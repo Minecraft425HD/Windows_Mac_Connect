@@ -38,7 +38,7 @@ reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Power" `
 Write-Host "  Fast Startup deaktiviert"
 
 # ── 2. OpenSSH ────────────────────────────────────────────────────────────────
-Write-Host "`n[2/6] OpenSSH Server einrichten..." -ForegroundColor Yellow
+Write-Host "`n[2/7] OpenSSH Server einrichten..." -ForegroundColor Yellow
 $ssh = Get-WindowsCapability -Online -Name "OpenSSH.Server*"
 if ($ssh.State -ne "Installed") {
     Add-WindowsCapability -Online -Name "OpenSSH.Server~~~~0.0.1.0" | Out-Null
@@ -51,7 +51,7 @@ New-NetFirewallRule -Name "WMC-SSH" -DisplayName "WMC SSH" `
 Write-Host "  OpenSSH Server läuft"
 
 # ── 3. Python / NSSM ──────────────────────────────────────────────────────────
-Write-Host "`n[3/6] Abhängigkeiten prüfen..." -ForegroundColor Yellow
+Write-Host "`n[3/7] Abhängigkeiten prüfen..." -ForegroundColor Yellow
 if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
     Write-Host "  Python nicht gefunden!" -ForegroundColor Red
     Write-Host "  Bitte Python 3.10+ von python.org installieren, dann neu starten." -ForegroundColor Red
@@ -69,7 +69,7 @@ if (-not (Test-Path $NssmPath)) {
 }
 
 # ── 4. WMC Agent ──────────────────────────────────────────────────────────────
-Write-Host "`n[4/6] WMC Agent installieren..." -ForegroundColor Yellow
+Write-Host "`n[4/7] WMC Agent installieren..." -ForegroundColor Yellow
 New-Item -ItemType Directory -Force -Path $AgentDir | Out-Null
 Copy-Item -Force "$PSScriptRoot\..\agent\agent.py" "$AgentDir\agent.py"
 
@@ -88,7 +88,7 @@ New-NetFirewallRule -Name "WMC-Agent" -DisplayName "WMC Agent" `
 Write-Host "  WMC Agent läuft auf Port $AgentPort"
 
 # ── 5. Sunshine Game-Streaming ────────────────────────────────────────────────
-Write-Host "`n[5/6] Sunshine installieren..." -ForegroundColor Yellow
+Write-Host "`n[5/7] Sunshine installieren..." -ForegroundColor Yellow
 
 # Aktuelle Version von GitHub Releases holen
 $release = Invoke-RestMethod "https://api.github.com/repos/LizardByte/Sunshine/releases/latest"
