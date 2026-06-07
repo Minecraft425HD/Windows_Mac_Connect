@@ -1,251 +1,271 @@
 # Windows-Mac Connect (WMC)
 
-Steuere deinen Gaming-PC vom MacBook aus — auch über das Internet, ohne Heimnetzwerk. Einschalten, ausschalten, schlafen legen: stabil wie die PS5-Fernsteuerung.
+Gaming-PC vom MacBook steuern und streamen — ein Befehl, sofort spielen.
+
+```
+wmc stream
+```
+
+Schaltet den PC ein (falls aus), wartet bis er hochgefahren ist, öffnet Moonlight.
 
 ---
 
-## Wie es funktioniert
+## Latenz — was realistisch ist
+
+| Wo du bist | Netzwerk-Zusatzlatenz | Spielbar für |
+|---|---|---|
+| Gleiches Haus (LAN/5GHz) | **2–8 ms** | Alles, auch kompetitiv |
+| Gleiche Stadt | **5–20 ms** | Alles |
+| Gleiches Land | **10–40 ms** | RPG, Singleplayer, Strategie |
+| Europa (DE → UK/FR) | **30–60 ms** | Casual, Singleplayer |
+| Interkontinental | **80–200 ms** | Nicht empfohlen |
+
+**Das Limit ist Physik, nicht Software.** Licht in Glasfaser braucht ~5 ms pro 1.000 km — das ist die unveränderliche Untergrenze.
+
+Die Software-Latenz (Encoding, Netzwerk-Stack, Decoding) mit diesem Stack: **< 5 ms** im Heimnetz.
+
+---
+
+## Architektur
 
 ```
-MacBook (wmc CLI)
-    │
-    │  HTTPS über Tailscale (verschlüsselt, kein offener Port nötig)
-    ▼
-Relay-Server (Raspberry Pi / NAS / alter PC — immer an)
-    │
-    ├── Wake-on-LAN ──────────────► Gaming-PC (auch wenn ausgeschaltet)
-    │
-    └── TCP → WMC Agent ──────────► Gaming-PC (wenn eingeschaltet)
-                                      shutdown / sleep / hibernate / lock
+MacBook
+  │  Moonlight (H.265/AV1, Hardware-Decoding)
+  │
+  │  Tailscale VPN (direkte verschlüsselte Verbindung, kein Umweg)
+  │
+Raspberry Pi 3B (immer an, LAN)
+  ├── WMC Relay → Wake-on-LAN → Gaming-PC (auch wenn aus)
+  └── WMC Relay → Agent       → Gaming-PC (shutdown/sleep)
+  
+Gaming-PC (Windows)
+  └── Sunshine (Hardware-Encoding: NVENC / AMF / QuickSync)
 ```
 
-**Warum ein Relay-Gerät?**  
-Der Gaming-PC ist ausgeschaltet — er kann keine Pakete empfangen. Ein immer-aktives Gerät im selben Netz (Raspberry Pi, NAS, Router mit Linux) sendet das Wake-on-LAN-Paket lokal. Genau das macht auch die PS5: Sony hat immer einen kleinen Chip aktiv.
+**Warum Tailscale?** Kein Port-Forwarding, kein DynDNS. Tailscale baut direkte Verbindungen (keine Cloud als Umweg) — das gibt die niedrigste mögliche Latenz über das Internet.
 
-**Warum Tailscale?**  
-Kein Port-Forwarding, kein DynDNS, kein offener Port ins Internet. Tailscale baut einen sicheren Mesh-VPN-Tunnel zwischen MacBook und Relay — egal ob du im Heimnetzwerk, im Café oder im Ausland bist.
+**Warum Sunshine + Moonlight?** Hardware-Encoding auf der GPU: NVIDIA NVENC, AMD AMF oder Intel QuickSync fügen < 1 ms Encoding-Latenz hinzu. Das ist das gleiche Protokoll wie NVIDIA GeForce Experience, nur open source und ohne Beschränkungen.
 
 ---
 
 ## Voraussetzungen
 
-| Gerät | Rolle |
+| Gerät | Details |
 |---|---|
-| Gaming-Notebook (Windows 10/11) | Zielgerät — wird ferngesteuert |
-| Raspberry Pi / NAS / alter PC | Relay — muss immer laufen |
-| MacBook | Steuergerät |
+| Gaming-PC | Windows 10/11, GPU mit Hardware-Encoder (NVIDIA ab GTX 900, AMD ab RX 400, Intel ab 6. Gen) |
+| Raspberry Pi 3B/3B+ | LAN-Kabel, Raspberry Pi OS Lite |
+| MacBook | macOS 11+, Tailscale, Moonlight |
 
 ---
 
-## Schritt-für-Schritt-Setup
+## Setup
 
-### 0. Raspberry Pi vorbereiten (einmalig)
+### Schritt 0 — Raspberry Pi OS installieren (falls neu)
 
-Falls der Pi noch kein OS hat:
-1. [Raspberry Pi Imager](https://www.raspberrypi.com/software/) herunterladen
-2. **Raspberry Pi OS Lite (64-bit)** flashen — kein Desktop nötig
-3. Im Imager vorab SSH aktivieren und Benutzername/Passwort setzen
-4. LAN-Kabel einstecken, Pi starten
-5. SSH-Verbindung: `ssh pi@<ip-im-router>`
+1. [Raspberry Pi Imager](https://www.raspberrypi.com/software/) → **Raspberry Pi OS Lite (64-bit)**
+2. Im Imager: SSH aktivieren, Benutzername + Passwort setzen
+3. LAN-Kabel einstecken, starten
+4. `ssh pi@<ip-im-router>`
 
 ---
 
-### 1. Tailscale auf allen Geräten installieren
+### Schritt 1 — Tailscale überall installieren
 
-Auf **allen drei Geräten** (Gaming-PC, Raspberry Pi, MacBook):
+Auf **Gaming-PC**, **Raspberry Pi** und **MacBook** — mit **demselben Account** einloggen.
 
-```
-https://tailscale.com/download
-```
+**Download:** https://tailscale.com/download
 
-Mit demselben Tailscale-Account anmelden. Danach hat jedes Gerät eine feste `100.x.x.x`-IP die sich nie ändert — egal wo du bist, egal ob Router-Neustart.
-
-**Pi:**
 ```bash
+# Pi:
 curl -fsSL https://tailscale.com/install.sh | sh
 sudo tailscale up
-# Im Browser den Link öffnen und einloggen
-tailscale ip -4   # → merken, z.B. 100.64.0.2
+tailscale ip -4   # notieren, z.B. 100.64.0.2
+
+# Gaming-PC: Installer ausführen, im Browser einloggen
+# MacBook: Installer ausführen, im Browser einloggen
 ```
+
+Jetzt haben alle Geräte eine feste `100.x.x.x`-IP, die sich nie ändert.
 
 ---
 
-### 2. Gaming-PC vorbereiten (Windows)
+### Schritt 2 — Gaming-PC einrichten
 
-**a) BIOS/UEFI:** Wake-on-LAN aktivieren  
-   Suche nach: *Wake on LAN*, *Power on by PCI-E/PCIe*, *ErP Ready* (muss AUS sein)
-
-**b) Setup-Skript als Administrator ausführen:**
+PowerShell als **Administrator** öffnen:
 
 ```powershell
-# PowerShell als Administrator
+git clone https://github.com/minecraft425hd/windows_mac_connect.git
+cd windows_mac_connect
 Set-ExecutionPolicy Bypass -Scope Process
 .\scripts\setup_windows.ps1
 ```
 
-Das Skript:
-- Aktiviert Wake-on-LAN im Netzwerktreiber
-- Deaktiviert Fast Startup (nötig für WoL vom echten Ausschalten)
-- Aktiviert OpenSSH Server
-- Installiert den WMC Agent als Windows-Dienst
+Das Skript macht automatisch:
+- Wake-on-LAN im Netzwerktreiber aktivieren
+- Fast Startup deaktivieren (nötig für WoL nach echtem Shutdown)
+- OpenSSH Server aktivieren
+- WMC Agent als Windows-Dienst installieren
+- **Sunshine installieren und latenzoptimiert konfigurieren** (NVENC/AMF/QuickSync automatisch erkannt)
+- Alle nötigen Firewall-Regeln setzen
 
-**c) MAC-Adresse notieren** — das Skript zeigt sie am Ende an (z.B. `AA:BB:CC:DD:EE:FF`)
+Am Ende zeigt das Skript die **MAC-Adresse** — notieren.
 
-**d) Tailscale-IP des Gaming-PCs notieren** (z.B. `100.64.0.5`)
+**Sunshine Web-UI aufrufen** (einmalig, Benutzername + Passwort setzen):
+```
+https://localhost:47990
+```
+
+**BIOS/UEFI:** Wake-on-LAN aktivieren — suche nach:
+- *Wake on LAN*
+- *Power on by PCI-E/PCIe*
+- *ErP Ready* → muss **AUS** sein
 
 ---
 
-### 3. Raspberry Pi als Relay einrichten
+### Schritt 3 — Raspberry Pi einrichten
 
 ```bash
-# Auf dem Pi (per SSH):
+# Per SSH auf dem Pi:
 git clone https://github.com/minecraft425hd/windows_mac_connect.git
 cd windows_mac_connect
-
-# Setup-Skript (installiert alles, erstellt systemd-Dienst)
 sudo bash scripts/setup_relay.sh
 ```
 
-Das Skript gibt am Ende einen **API-Token** aus — den sicher notieren!
-
-Danach MAC-Adresse und IP des Gaming-PCs eintragen:
-
+Danach Konfiguration bearbeiten:
 ```bash
 sudo nano /etc/wmc/relay.env
 ```
 
 ```env
-WMC_API_TOKEN=<generierter-token>    # so lassen!
-WMC_PC_MAC=AA:BB:CC:DD:EE:FF        # ← MAC des Gaming-PCs eintragen
-WMC_PC_IP=192.168.1.100             # ← lokale IP des Gaming-PCs eintragen
+WMC_API_TOKEN=<automatisch generiert — so lassen>
+WMC_PC_MAC=AA:BB:CC:DD:EE:FF     ← MAC des Gaming-PCs
+WMC_PC_IP=192.168.1.100           ← lokale IP des Gaming-PCs (im Router nachschauen)
 WMC_AGENT_PORT=9876
 WMC_WOL_BROADCAST=255.255.255.255
 WMC_RELAY_PORT=8765
 ```
 
-**MAC-Adresse des Gaming-PCs herausfinden** (in PowerShell auf dem PC):
+MAC-Adresse des PCs herausfinden (in PowerShell auf dem PC):
 ```powershell
 ipconfig /all | Select-String "Physical"
 ```
 
-**Lokale IP des Gaming-PCs** (im Router nachschauen oder):
-```powershell
-ipconfig | Select-String "IPv4"
-```
-
-Dienst neu starten:
 ```bash
 sudo systemctl restart wmc-relay
-sudo systemctl status wmc-relay   # sollte "active (running)" zeigen
+sudo systemctl status wmc-relay   # → active (running)
 ```
-
-**Relay-URL für den Mac-Client:**
-```bash
-tailscale ip -4   # z.B. 100.64.0.2
-# → Relay-URL: http://100.64.0.2:8765
-```
-
-> **Der Port 8765 muss NICHT im Router freigegeben werden.**  
-> Tailscale tunnelt alles verschlüsselt — kein DynDNS, kein Port-Forwarding.
 
 ---
 
-### 4. MacBook einrichten
+### Schritt 4 — MacBook einrichten
 
 ```bash
 git clone https://github.com/minecraft425hd/windows_mac_connect.git
 cd windows_mac_connect
 bash scripts/setup_mac.sh
-
-# Konfigurieren
-wmc config
-# Relay URL: http://100.64.0.2:8765   (Tailscale-IP des Relay)
-# API Token:  <token aus /etc/wmc/relay.env>
 ```
+
+Installiert automatisch: `wmc` CLI, Moonlight, Tailscale (falls nicht vorhanden).
+
+Konfigurieren:
+```bash
+wmc config
+```
+```
+Relay URL:               http://100.64.0.2:8765        ← Tailscale-IP des Pi
+API Token:               <aus /etc/wmc/relay.env>
+Tailscale-IP des PCs:    100.64.0.5                    ← für direkten Moonlight-Start
+```
+
+**Moonlight mit Sunshine pairen** (einmalig):
+1. Moonlight öffnen
+2. PC in der Liste anklicken
+3. PIN-Code eingeben → in Sunshine Web-UI (`https://localhost:47990`) bestätigen
 
 ---
 
 ## Verwendung
 
 ```bash
-wmc status      # Ist der Gaming-PC an?
-wmc wake        # Einschalten (Wake-on-LAN)
+wmc stream      # PC einschalten + Moonlight starten  ← alles in einem
+wmc status      # Ist der PC online?
+wmc ping        # Latenz messen (zeigt ob Tailscale Direct Connection hat)
+wmc wake        # Nur einschalten
 wmc shutdown    # Herunterfahren
-wmc sleep       # Schlafen legen (Ruhezustand)
-wmc hibernate   # Ruhezustand (Festplatte, kein Stromverbrauch)
-wmc lock        # Windows-Bildschirm sperren
+wmc hibernate   # Ruhezustand (WoL möglich, kein Stromverbrauch)
+wmc sleep       # Schlafen (schneller aufwachen als hibernate)
+wmc lock        # Bildschirm sperren
 ```
 
-### Typischer Ablauf
+---
 
+## Latenz optimieren
+
+### 1. Tailscale Direct Connection sicherstellen
 ```bash
-# Abends den PC einschalten vom Sofa / Zug / Café:
-wmc wake
-# Warten bis er hochgefahren ist (~30s):
-wmc status
-# Später wieder ausschalten:
-wmc shutdown
+tailscale status
+# Soll zeigen: direct, nicht relay
 ```
+Falls `relay`: Firewall auf beiden Seiten prüfen. Tailscale funktioniert durch die meisten NATs automatisch.
 
----
+### 2. Moonlight-Einstellungen
+- **Codec:** AV1 (falls GPU es unterstützt) → sonst H.265 → H.264
+- **FPS:** so hoch wie dein Monitor kann (120 / 144)
+- **Auflösung:** 1080p für geringstes Encoding-Overhead, 1440p wenn Bandbreite reicht
+- **Bitrate:** 20–50 Mbps für 1080p, 50–100 Mbps für 1440p
 
-## Internet-Betrieb (ohne Heimnetzwerk)
-
-Tailscale verbindet MacBook und Relay über das Internet — vollautomatisch, ohne Port-Forwarding. Die Verbindung funktioniert:
-
-- Im Heimnetzwerk (direkte Verbindung)
-- Unterwegs über Mobilfunk
-- Im Hotel, Café, überall
-
-**Voraussetzung:** Das Relay-Gerät muss eingeschaltet sein und Internet haben.
-
----
-
-## Wake-on-LAN: Was funktioniert
-
-| Zustand des PCs | WoL möglich? | Hinweis |
-|---|---|---|
-| Ausgeschaltet (Kaltstart) | ✅ Ja | Fast Startup muss deaktiviert sein |
-| Schlafen (Sleep/S3) | ✅ Ja | Standard |
-| Ruhezustand (Hibernate/S4) | ✅ Ja | |
-| Ausgeschaltet (Fast Startup an) | ❌ Nein | Deshalb deaktivieren wir es |
-
----
-
-## Sicherheit
-
-- Alle Befehle sind mit einem API-Token gesichert
-- Der Relay-Port ist nur über Tailscale erreichbar (kein offener Internetport)
-- Der WMC Agent auf Windows lauscht nur auf Tailscale-IP (empfohlen: `WMC_AGENT_BIND=100.x.x.x`)
-- Token in Dateien mit `chmod 600` gespeichert
+### 3. Windows-seitig
+- Spiel im Vollbild (nicht Fenstermodus / Borderless)
+- V-Sync im Spiel **aus** — Moonlight hat eigene Frame-Synchronisation
+- NVIDIA: "Low Latency Mode" in den NVIDIA Control Panel-Einstellungen → **Ultra**
 
 ---
 
 ## Fehlerbehebung
 
-**`wmc wake` sendet Paket, PC startet nicht:**
-1. BIOS Wake-on-LAN aktiviert? (Neustart → BIOS prüfen)
-2. Fast Startup deaktiviert? (`setup_windows.ps1` nochmal laufen lassen)
-3. PC ist am Stromnetz? (Laptop: muss angesteckt sein)
-4. Richtiger WOL_BROADCAST? Bei manchen Routern: `192.168.1.255`
+**`wmc stream`: PC startet nicht (WoL schlägt fehl)**
+1. BIOS Wake-on-LAN aktiviert?
+2. PC am Strom? (Laptop: Netzteil angesteckt)
+3. Fast Startup aus? → `setup_windows.ps1` nochmal laufen lassen
+4. Richtiger `WMC_WOL_BROADCAST`? Bei manchen Routern: `192.168.1.255`
 
-**`wmc status` zeigt "Relay: error":**
-1. Tailscale auf MacBook und Relay aktiv? (`tailscale status`)
-2. Relay-Dienst läuft? (`sudo systemctl status wmc-relay`)
-3. Relay-URL korrekt? (`wmc config` nochmal)
+**Moonlight verbindet sich nicht**
+1. Sunshine läuft? → `https://localhost:47990` auf dem PC aufrufen
+2. Firewall-Ports offen? → `setup_windows.ps1` nochmal laufen lassen
+3. Noch nicht gepairt? → Moonlight → PC anklicken → PIN eingeben
 
-**Agent nicht erreichbar (shutdown/sleep schlägt fehl):**
-1. Gaming-PC an? (`wmc status`)
-2. WMC Agent läuft? (Windows: `Get-Service WMCAgent`)
-3. Tailscale-IP des PCs korrekt in `relay.env`? (`WMC_PC_IP`)
+**Hohe Latenz / Ruckeln**
+```bash
+wmc ping   # Relay-Latenz messen
+tailscale status   # Direct Connection prüfen
+```
+
+**Relay nicht erreichbar**
+```bash
+# Auf dem Pi:
+sudo systemctl status wmc-relay
+sudo journalctl -u wmc-relay -n 30
+# Tailscale aktiv?
+tailscale status
+```
+
+---
+
+## Sicherheit
+
+- API-Token sichert alle WMC-Befehle
+- Relay-Port nur über Tailscale erreichbar (kein offener Internetport)
+- Sunshine-Verbindungen durch Moonlight-Pairing gesichert (RSA-Key-Exchange)
+- Tailscale verwendet WireGuard (state-of-the-art Verschlüsselung)
+- Config-Dateien: `chmod 600`
 
 ---
 
 ## Projektstruktur
 
 ```
-relay/          Relay-Server (Flask, läuft auf Pi/NAS)
-agent/          Windows-Agent (Python-Dienst auf Gaming-PC)
-client/         Mac CLI-Tool (wmc)
-scripts/        Setup-Skripte für alle drei Geräte
+relay/          Relay-Server (Pi — Wake-on-LAN + Agent-Proxy)
+agent/          Windows-Dienst (shutdown/sleep/hibernate/lock)
+client/         wmc CLI für MacBook
+scripts/        Setup-Skripte (Windows, Pi, Mac)
 ```
