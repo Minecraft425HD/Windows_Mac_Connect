@@ -187,9 +187,9 @@ Tailscale-IP des PCs:    100.64.0.5                    ← für direkten Moonlig
 ## Verwendung
 
 ```bash
-wmc stream      # PC einschalten + Moonlight starten  ← alles in einem
+wmc stream      # PC einschalten + Moonlight starten  ← Hauptbefehl
 wmc status      # Ist der PC online?
-wmc ping        # Latenz messen (zeigt ob Tailscale Direct Connection hat)
+wmc ping        # Latenz messen + Tailscale Direct/Relay prüfen
 wmc wake        # Nur einschalten
 wmc shutdown    # Herunterfahren
 wmc hibernate   # Ruhezustand (WoL möglich, kein Stromverbrauch)
@@ -197,9 +197,31 @@ wmc sleep       # Schlafen (schneller aufwachen als hibernate)
 wmc lock        # Bildschirm sperren
 ```
 
+### iPhone Web-UI
+
+Der Relay-Server liefert eine mobile Web-App direkt mit. Im Safari öffnen:
+
+```
+http://<tailscale-ip-des-pi>:8765/?token=<API-TOKEN>
+```
+
+"Teilen → Zum Home-Bildschirm" — sieht aus und fühlt sich an wie eine native App.
+
 ---
 
 ## Latenz optimieren
+
+### 0. Windows-Latenz-Optimierung (einmalig, nach setup_windows.ps1)
+
+```powershell
+# PowerShell als Administrator:
+.\scripts\optimize_windows.ps1
+# Danach: PC neu starten!
+```
+
+Macht automatisch: Ultimate Performance-Modus, Interrupt Moderation deaktivieren,
+NVIDIA Ultra Low Latency, HAGS aktivieren, Nagle-Algorithmus deaktivieren,
+NIC-Energiesparmodi ausschalten.
 
 ### 1. Tailscale Direct Connection sicherstellen
 ```bash

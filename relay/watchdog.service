@@ -1,0 +1,19 @@
+# systemd unit — copy to /etc/systemd/system/wmc-watchdog.service
+# then: sudo systemctl enable --now wmc-watchdog
+
+[Unit]
+Description=WMC Watchdog
+After=network-online.target wmc-relay.service
+Wants=network-online.target
+Requires=wmc-relay.service
+
+[Service]
+User=wmc
+WorkingDirectory=/opt/wmc/relay
+EnvironmentFile=/etc/wmc/relay.env
+ExecStart=/opt/wmc/venv/bin/python watchdog.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

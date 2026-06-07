@@ -87,7 +87,13 @@ else
 fi
 
 # 5. systemd-Service
-echo "[5/6] systemd-Service registrieren..."
+echo "[5/7] Watchdog installieren..."
+cp "$REPO_ROOT/relay/watchdog.py" "$INSTALL_DIR/relay/"
+mkdir -p /var/log/wmc
+chown wmc:wmc /var/log/wmc
+cp "$REPO_ROOT/relay/watchdog.service" /etc/systemd/system/wmc-watchdog.service
+
+echo "[6/7] systemd-Services registrieren..."
 cat > /etc/systemd/system/wmc-relay.service <<'UNIT'
 [Unit]
 Description=WMC Relay Server
@@ -113,18 +119,23 @@ WantedBy=multi-user.target
 UNIT
 
 systemctl daemon-reload
-systemctl enable wmc-relay
+systemctl enable wmc-relay wmc-watchdog
 systemctl restart wmc-relay
 sleep 2
+systemctl restart wmc-watchdog
 
-echo "[6/6] Status prüfen..."
-if systemctl is-active --quiet wmc-relay; then
-    echo "  ✓ wmc-relay läuft"
-else
-    echo "  ✗ Fehler! Logs:"
-    journalctl -u wmc-relay -n 20 --no-pager
-    exit 1
-fi
+echo "[7/7] Status prüfen..."
+FAIL=0
+for svc in wmc-relay wmc-watchdog; do
+    if systemctl is-active --quiet "$svc"; then
+        echo "  ✓ $svc läuft"
+    else
+        echo "  ✗ $svc fehlgeschlagen:"
+        journalctl -u "$svc" -n 10 --no-pager
+        FAIL=1
+    fi
+done
+[[ $FAIL -eq 1 ]] && exit 1
 
 # 6. Tailscale installieren (falls nicht vorhanden)
 if ! command -v tailscale &>/dev/null; then

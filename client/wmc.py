@@ -115,16 +115,23 @@ def cmd_wake(cfg, silent: bool = False) -> bool:
 
 def wait_for_pc(cfg, timeout: int = 120) -> bool:
     """Wartet bis der PC online ist. Gibt True zurück wenn erfolgreich."""
-    print("Warte auf PC", end="", flush=True)
-    deadline = time.monotonic() + timeout
+    spinners = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+    start = time.monotonic()
+    deadline = start + timeout
+    i = 0
     while time.monotonic() < deadline:
+        elapsed = int(time.monotonic() - start)
+        spin = spinners[i % len(spinners)]
+        print(f"\r{spin} Warte auf PC... {elapsed}s  ", end="", flush=True)
         result = api(cfg, "GET", "/status")
         if result.get("pc_online") is True:
-            print(" \033[32mONLINE\033[0m")
+            boot_time = int(time.monotonic() - start)
+            print(f"\r\033[32m✓\033[0m PC bereit nach {boot_time}s          ")
             return True
-        print(".", end="", flush=True)
+        i += 1
         time.sleep(3)
-    print(" \033[31mTimeout\033[0m")
+    elapsed = int(time.monotonic() - start)
+    print(f"\r\033[31m✗\033[0m Timeout nach {elapsed}s              ")
     return False
 
 
@@ -161,7 +168,11 @@ def cmd_stream(cfg):
             sys.exit(1)
         # Windows braucht nach dem Ping noch ~10s bis Sunshine bereit ist
         print("Warte kurz bis Sunshine bereit ist…")
-        time.sleep(10)
+        spinners = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+        for i in range(10):
+            print(f"\r{spinners[i % len(spinners)]} Warte auf Sunshine... {i+1}s  ", end="", flush=True)
+            time.sleep(1)
+        print(f"\r\033[32m✓\033[0m Sunshine bereit                ")
     elif pc_online is True:
         print("Gaming-PC ist bereits online.")
     else:
@@ -226,7 +237,61 @@ def cmd_ping(cfg):
             print("\033[33m  Gute Verbindung — Streaming problemlos möglich\033[0m")
         else:
             print("\033[31m  Hohe Latenz — prüfe ob Tailscale eine Direct Connection hat\033[0m")
-            print("  tailscale status   (sollte 'direct' zeigen, nicht 'relay')")
+
+    # Tailscale-Verbindungstyp prüfen
+    print()
+    print("Tailscale-Verbindungsstatus…")
+    pc_ip = cfg.get("WMC_PC_TAILSCALE_IP", "")
+    try:
+        result = subprocess.run(
+            ["tailscale", "status"],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode != 0:
+            print("  \033[33mtailscale status nicht verfügbar\033[0m")
+        else:
+            output = result.stdout
+            # Suche die Zeile mit der PC-IP oder "relay"/"direct" Keywords
+            connection_type = None
+            relay_host = None
+            for line in output.splitlines():
+                if pc_ip and pc_ip in line:
+                    if "relay" in line.lower():
+                        connection_type = "relay"
+                        # Extrahiere den Relay-Host wenn vorhanden
+                        parts = line.split()
+                        for j, p in enumerate(parts):
+                            if p == "relay" and j + 1 < len(parts):
+                                relay_host = parts[j + 1]
+                    elif "direct" in line.lower():
+                        connection_type = "direct"
+                    break
+
+            if connection_type == "direct":
+                print("  \033[32m✓ Tailscale: Direktverbindung (direct)\033[0m — optimale Latenz für Streaming")
+            elif connection_type == "relay":
+                relay_info = f" via {relay_host}" if relay_host else ""
+                print(f"  \033[31m⚠ Tailscale: Relay-Verbindung{relay_info}\033[0m")
+                print()
+                print("  \033[33mTipp: Relay erhöht die Latenz spürbar. So zur Direktverbindung wechseln:\033[0m")
+                print("   1. Firewall-Ausnahme für UDP 41641 auf beiden Geräten prüfen")
+                print("   2. Auf dem PC: tailscale up --accept-routes")
+                print("   3. Im Tailscale-Admin-Panel: MagicDNS und Subnet Routes prüfen")
+                print("   4. Router-UPnP aktivieren oder Port 41641 UDP weiterleiten")
+            elif pc_ip:
+                print(f"  \033[33m? PC ({pc_ip}) nicht in 'tailscale status' gefunden\033[0m")
+                print("  Ist Tailscale auf dem PC aktiv?")
+            else:
+                # Keine PC-IP konfiguriert — zeige rohe Ausgabe kompakt
+                print("  (WMC_PC_TAILSCALE_IP nicht gesetzt — zeige alle Peers)")
+                for line in output.splitlines()[1:6]:  # max 5 Zeilen
+                    if line.strip():
+                        print(f"    {line}")
+    except FileNotFoundError:
+        print("  \033[33mtailscale nicht gefunden — ist es installiert?\033[0m")
+        print("  https://tailscale.com/download")
+    except subprocess.TimeoutExpired:
+        print("  \033[33mtailscale status Timeout\033[0m")
 
 
 def cmd_power(cfg, action: str):
