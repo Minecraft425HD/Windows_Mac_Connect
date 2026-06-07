@@ -39,15 +39,34 @@ Kein Port-Forwarding, kein DynDNS, kein offener Port ins Internet. Tailscale bau
 
 ## Schritt-für-Schritt-Setup
 
+### 0. Raspberry Pi vorbereiten (einmalig)
+
+Falls der Pi noch kein OS hat:
+1. [Raspberry Pi Imager](https://www.raspberrypi.com/software/) herunterladen
+2. **Raspberry Pi OS Lite (64-bit)** flashen — kein Desktop nötig
+3. Im Imager vorab SSH aktivieren und Benutzername/Passwort setzen
+4. LAN-Kabel einstecken, Pi starten
+5. SSH-Verbindung: `ssh pi@<ip-im-router>`
+
+---
+
 ### 1. Tailscale auf allen Geräten installieren
 
-Auf **allen drei Geräten** (Gaming-PC, Relay, MacBook):
+Auf **allen drei Geräten** (Gaming-PC, Raspberry Pi, MacBook):
 
 ```
 https://tailscale.com/download
 ```
 
-Mit demselben Account anmelden. Danach hat jedes Gerät eine feste `100.x.x.x`-IP, die immer erreichbar ist — egal wo du bist.
+Mit demselben Tailscale-Account anmelden. Danach hat jedes Gerät eine feste `100.x.x.x`-IP die sich nie ändert — egal wo du bist, egal ob Router-Neustart.
+
+**Pi:**
+```bash
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up
+# Im Browser den Link öffnen und einloggen
+tailscale ip -4   # → merken, z.B. 100.64.0.2
+```
 
 ---
 
@@ -76,42 +95,58 @@ Das Skript:
 
 ---
 
-### 3. Relay-Gerät einrichten (Raspberry Pi / Linux)
+### 3. Raspberry Pi als Relay einrichten
 
 ```bash
-# Repo klonen
+# Auf dem Pi (per SSH):
 git clone https://github.com/minecraft425hd/windows_mac_connect.git
 cd windows_mac_connect
 
-# Setup (als root)
+# Setup-Skript (installiert alles, erstellt systemd-Dienst)
 sudo bash scripts/setup_relay.sh
 ```
 
-Danach `/etc/wmc/relay.env` bearbeiten:
+Das Skript gibt am Ende einen **API-Token** aus — den sicher notieren!
+
+Danach MAC-Adresse und IP des Gaming-PCs eintragen:
 
 ```bash
 sudo nano /etc/wmc/relay.env
 ```
 
 ```env
-WMC_API_TOKEN=<generierter-token-aus-setup>   # NICHT ändern, nur notieren!
-WMC_PC_MAC=AA:BB:CC:DD:EE:FF                  # MAC-Adresse des Gaming-PCs
-WMC_PC_IP=192.168.1.100                        # Lokale IP des Gaming-PCs
+WMC_API_TOKEN=<generierter-token>    # so lassen!
+WMC_PC_MAC=AA:BB:CC:DD:EE:FF        # ← MAC des Gaming-PCs eintragen
+WMC_PC_IP=192.168.1.100             # ← lokale IP des Gaming-PCs eintragen
 WMC_AGENT_PORT=9876
 WMC_WOL_BROADCAST=255.255.255.255
 WMC_RELAY_PORT=8765
 ```
 
+**MAC-Adresse des Gaming-PCs herausfinden** (in PowerShell auf dem PC):
+```powershell
+ipconfig /all | Select-String "Physical"
+```
+
+**Lokale IP des Gaming-PCs** (im Router nachschauen oder):
+```powershell
+ipconfig | Select-String "IPv4"
+```
+
 Dienst neu starten:
 ```bash
 sudo systemctl restart wmc-relay
+sudo systemctl status wmc-relay   # sollte "active (running)" zeigen
 ```
 
-**Relay-URL für den Client:** `http://<tailscale-ip-des-relay>:8765`  
-Beispiel: `http://100.64.0.2:8765`
+**Relay-URL für den Mac-Client:**
+```bash
+tailscale ip -4   # z.B. 100.64.0.2
+# → Relay-URL: http://100.64.0.2:8765
+```
 
-> **Wichtig:** Der Relay-Port 8765 muss NICHT im Router freigegeben werden.  
-> Tailscale erledigt das. Der Port ist nur über Tailscale erreichbar.
+> **Der Port 8765 muss NICHT im Router freigegeben werden.**  
+> Tailscale tunnelt alles verschlüsselt — kein DynDNS, kein Port-Forwarding.
 
 ---
 
