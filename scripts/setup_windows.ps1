@@ -1,5 +1,6 @@
 # setup_windows.ps1 — Gaming-PC (als Administrator ausführen)
-# Richtet ein: Wake-on-LAN, WMC Agent, Sunshine Game-Streaming
+# Richtet vollautomatisch ein:
+#   Wake-on-LAN · OpenSSH · Python · WMC Agent · Sunshine · Auto-Login · Tailscale
 
 #Requires -RunAsAdministrator
 
@@ -8,39 +9,44 @@ param(
     [string]$BindHost  = "0.0.0.0"
 )
 
-$ErrorActionPreference = "Stop"
-$WmcDir    = "C:\WMC"
-$AgentDir  = "$WmcDir\agent"
-$NssmPath  = "$WmcDir\nssm.exe"
+$ErrorActionPreference = "Continue"
+$WmcDir   = "C:\WMC"
+$AgentDir = "$WmcDir\agent"
+$NssmPath = "$WmcDir\nssm.exe"
+$Steps    = 8
 
-Write-Host "=== WMC Windows Setup ===" -ForegroundColor Cyan
 New-Item -ItemType Directory -Force -Path $WmcDir | Out-Null
 
+Write-Host ""
+Write-Host "╔══════════════════════════════════════════════════════╗" -ForegroundColor Cyan
+Write-Host "║         WMC Windows Setup — Gaming-PC                ║" -ForegroundColor Cyan
+Write-Host "║  Wake-on-LAN · Streaming · Fernsteuerung             ║" -ForegroundColor Cyan
+Write-Host "╚══════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+Write-Host ""
+
 # ── 1. Wake-on-LAN ────────────────────────────────────────────────────────────
-Write-Host "`n[1/7] Wake-on-LAN aktivieren..." -ForegroundColor Yellow
+Write-Host "[1/$Steps] Wake-on-LAN aktivieren" -ForegroundColor Yellow
+Write-Host "  Damit der PC per Netzwerk eingeschaltet werden kann."
 Get-NetAdapter | Where-Object { $_.Status -eq "Up" } | ForEach-Object {
     $name = $_.Name
     foreach ($kw in @("WakeOnMagicPacket", "*WakeOnMagicPacket", "*WakeOnPattern")) {
         Set-NetAdapterAdvancedProperty -Name $name `
             -RegistryKeyword $kw -RegistryValue 1 -ErrorAction SilentlyContinue
     }
-    # "Allow the computer to wake this device" in Gerätemanager
-    $pnp = Get-PnpDeviceProperty -InstanceId (Get-NetAdapterHardwareInfo -Name $name `
-        -ErrorAction SilentlyContinue).PnPDeviceID -KeyName DEVPKEY_Device_WakeFromD0 `
-        -ErrorAction SilentlyContinue
     Write-Host "  OK: $name"
 }
-
-# Fast Startup deaktivieren (sonst kein WoL nach echtem Shutdown)
-powercfg /hibernate on
+powercfg /hibernate on 2>$null
 reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Power" `
     /v HiberbootEnabled /t REG_DWORD /d 0 /f | Out-Null
-Write-Host "  Fast Startup deaktiviert"
+Write-Host "  Fast Startup deaktiviert (erforderlich fur WoL nach Shutdown)"
 
 # ── 2. OpenSSH ────────────────────────────────────────────────────────────────
-Write-Host "`n[2/7] OpenSSH Server einrichten..." -ForegroundColor Yellow
+Write-Host ""
+Write-Host "[2/$Steps] OpenSSH Server" -ForegroundColor Yellow
+Write-Host "  Ermoeglicht sichere Verbindungen vom MacBook."
 $ssh = Get-WindowsCapability -Online -Name "OpenSSH.Server*"
 if ($ssh.State -ne "Installed") {
+    Write-Host "  Installiere OpenSSH..." -ForegroundColor Gray
     Add-WindowsCapability -Online -Name "OpenSSH.Server~~~~0.0.1.0" | Out-Null
 }
 Set-Service -Name sshd -StartupType Automatic
@@ -48,189 +54,201 @@ Start-Service sshd -ErrorAction SilentlyContinue
 New-NetFirewallRule -Name "WMC-SSH" -DisplayName "WMC SSH" `
     -Direction Inbound -Protocol TCP -LocalPort 22 -Action Allow `
     -ErrorAction SilentlyContinue | Out-Null
-Write-Host "  OpenSSH Server läuft"
+Write-Host "  OK: OpenSSH Server laeuft"
 
-# ── 3. Python / NSSM ──────────────────────────────────────────────────────────
-Write-Host "`n[3/7] Abhängigkeiten prüfen..." -ForegroundColor Yellow
+# ── 3. Python ────────────────────────────────────────────────────────────────
+Write-Host ""
+Write-Host "[3/$Steps] Python" -ForegroundColor Yellow
+Write-Host "  Benoetigt fuer den WMC Agent (Hintergrunddienst)."
 if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
-    Write-Host "  Python nicht gefunden!" -ForegroundColor Red
-    Write-Host "  Bitte Python 3.10+ von python.org installieren, dann neu starten." -ForegroundColor Red
-    exit 1
+    Write-Host "  Python nicht gefunden -- installiere via winget..." -ForegroundColor Gray
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+        winget install --id Python.Python.3.12 --silent --accept-package-agreements `
+            --accept-source-agreements
+        $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + `
+                    [System.Environment]::GetEnvironmentVariable("Path","User")
+    } else {
+        Write-Host "  winget nicht verfuegbar." -ForegroundColor Red
+        Write-Host "  Bitte Python 3.10+ von https://python.org manuell installieren" -ForegroundColor Red
+        Write-Host "  Dann dieses Skript neu starten." -ForegroundColor Red
+        exit 1
+    }
 }
-Write-Host "  Python: $((python --version 2>&1))"
+Write-Host "  OK: $((python --version 2>&1))"
 
+# ── 4. WMC Agent ─────────────────────────────────────────────────────────────
+Write-Host ""
+Write-Host "[4/$Steps] WMC Agent installieren" -ForegroundColor Yellow
+Write-Host "  Empfaengt Fernbefehle: Herunterfahren, Schlafen, Sperren."
 if (-not (Test-Path $NssmPath)) {
-    Write-Host "  NSSM wird heruntergeladen..." -ForegroundColor Gray
+    Write-Host "  Lade NSSM (Service Manager)..." -ForegroundColor Gray
     $zip = "$WmcDir\nssm.zip"
     Invoke-WebRequest -Uri "https://nssm.cc/release/nssm-2.24.zip" -OutFile $zip
-    Expand-Archive -Path $zip -DestinationPath "$WmcDir\nssm_tmp"
+    Expand-Archive -Path $zip -DestinationPath "$WmcDir\nssm_tmp" -Force
     Copy-Item "$WmcDir\nssm_tmp\nssm-2.24\win64\nssm.exe" $NssmPath
     Remove-Item -Recurse -Force "$WmcDir\nssm_tmp", $zip
 }
-
-# ── 4. WMC Agent ──────────────────────────────────────────────────────────────
-Write-Host "`n[4/7] WMC Agent installieren..." -ForegroundColor Yellow
 New-Item -ItemType Directory -Force -Path $AgentDir | Out-Null
 Copy-Item -Force "$PSScriptRoot\..\agent\agent.py" "$AgentDir\agent.py"
-
 & $NssmPath stop   WMCAgent 2>$null
 & $NssmPath remove WMCAgent confirm 2>$null
-& $NssmPath install WMCAgent (Get-Command python).Source "$AgentDir\agent.py"
+& $NssmPath install WMCAgent (Get-Command python).Source "$AgentDir\agent.py" 2>$null
 & $NssmPath set WMCAgent AppEnvironmentExtra "WMC_AGENT_PORT=$AgentPort" "WMC_AGENT_BIND=$BindHost"
 & $NssmPath set WMCAgent Start SERVICE_AUTO_START
 & $NssmPath set WMCAgent AppStdout "C:\WMC\agent.log"
 & $NssmPath set WMCAgent AppStderr "C:\WMC\agent_err.log"
-Start-Service WMCAgent
-
+Start-Service WMCAgent -ErrorAction SilentlyContinue
 New-NetFirewallRule -Name "WMC-Agent" -DisplayName "WMC Agent" `
     -Direction Inbound -Protocol TCP -LocalPort $AgentPort -Action Allow `
     -ErrorAction SilentlyContinue | Out-Null
-Write-Host "  WMC Agent läuft auf Port $AgentPort"
+Write-Host "  OK: WMC Agent laeuft als Windows-Dienst (Port $AgentPort)"
 
-# ── 5. Sunshine Game-Streaming ────────────────────────────────────────────────
-Write-Host "`n[5/7] Sunshine installieren..." -ForegroundColor Yellow
+# ── 5. Sunshine ───────────────────────────────────────────────────────────────
+Write-Host ""
+Write-Host "[5/$Steps] Sunshine Game-Streaming" -ForegroundColor Yellow
+Write-Host "  Uebertraegt Bild + Ton mit niedrigster Latenz (Hardware-Encoding)."
 
-# Aktuelle Version von GitHub Releases holen
-$release = Invoke-RestMethod "https://api.github.com/repos/LizardByte/Sunshine/releases/latest"
-$asset   = $release.assets | Where-Object { $_.name -match "sunshine-windows.*\.exe$" } | Select-Object -First 1
+$gpu     = (Get-WmiObject Win32_VideoController | Select-Object -First 1).Caption
+$encoder = "software"
+if ($gpu -match "NVIDIA")         { $encoder = "nvenc" }
+elseif ($gpu -match "AMD|Radeon") { $encoder = "amdvce" }
+elseif ($gpu -match "Intel")      { $encoder = "quicksync" }
+Write-Host "  GPU erkannt: $gpu  (Encoder: $encoder)"
 
-if (-not $asset) {
-    Write-Host "  Sunshine-Asset nicht gefunden — bitte manuell von https://github.com/LizardByte/Sunshine/releases installieren" -ForegroundColor Red
-} else {
-    $sunshineInstaller = "$WmcDir\sunshine_setup.exe"
-    Write-Host "  Lade $($asset.name) herunter..." -ForegroundColor Gray
-    Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $sunshineInstaller
-    # Silent-Install
-    Start-Process -FilePath $sunshineInstaller -ArgumentList "/S" -Wait
-    Remove-Item $sunshineInstaller -ErrorAction SilentlyContinue
-    Write-Host "  Sunshine installiert"
+try {
+    $release = Invoke-RestMethod "https://api.github.com/repos/LizardByte/Sunshine/releases/latest"
+    $asset   = $release.assets | Where-Object { $_.name -match "sunshine-windows.*\.exe$" } `
+                                | Select-Object -First 1
+    if ($asset) {
+        Write-Host "  Lade $($asset.name)..." -ForegroundColor Gray
+        $inst = "$WmcDir\sunshine_setup.exe"
+        Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $inst
+        Start-Process -FilePath $inst -ArgumentList "/S" -Wait
+        Remove-Item $inst -ErrorAction SilentlyContinue
+        Write-Host "  OK: Sunshine installiert"
+    }
+} catch {
+    Write-Host "  Download fehlgeschlagen. Manuell: https://github.com/LizardByte/Sunshine/releases" -ForegroundColor Red
+}
 
-    # Latenz-optimierte Sunshine-Konfiguration schreiben
-    $sunshineConf = "$env:APPDATA\Sunshine\sunshine.conf"
-    $confDir      = Split-Path $sunshineConf
-    New-Item -ItemType Directory -Force -Path $confDir | Out-Null
-
-    # GPU-Encoder ermitteln
-    $gpu = (Get-WmiObject Win32_VideoController | Select-Object -First 1).Caption
-    $encoder = "software"
-    if ($gpu -match "NVIDIA") { $encoder = "nvenc" }
-    elseif ($gpu -match "AMD|Radeon") { $encoder = "amdvce" }
-    elseif ($gpu -match "Intel") { $encoder = "quicksync" }
-    Write-Host "  GPU erkannt: $gpu → Encoder: $encoder"
-
-    @"
-# WMC Sunshine Konfiguration — latenzoptimiert
-# Encoder: $encoder (automatisch ermittelt)
+$confDir = "$env:APPDATA\Sunshine"
+New-Item -ItemType Directory -Force -Path $confDir | Out-Null
+@"
 encoder = $encoder
-
-# Auflösung & Framerate
 fps = [30, 60, 90, 120]
 resolutions = [1280x720, 1920x1080, 2560x1440, 3840x2160]
-
-# Niedrigste Latenz: kein B-Frame-Delay, kein Rate-Control-Overhead
 nvenc_preset = p1
 nvenc_twopass = disabled
 nvenc_rc = cbr
 amdvce_quality = speed
 qsv_preset = veryfast
-
-# Codec-Priorität: AV1 > H.265 > H.264 (bessere Qualität bei gleichem Bitrate)
 hevc_mode = 2
 av1_mode = 2
-
-# Audio-Latenz minimieren
 audio_sink =
-
-# Gamepad
 gamepad = ds4
-
-# Netzwerk — auf allen Interfaces lauschen (Tailscale + LAN)
 address_family = both
-"@ | Set-Content -Encoding UTF8 $sunshineConf
+"@ | Set-Content -Encoding UTF8 "$confDir\sunshine.conf"
 
-    Write-Host "  Latenzoptimierte Konfiguration geschrieben: $sunshineConf"
+New-NetFirewallRule -Name "WMC-Sunshine-TCP" -DisplayName "WMC Sunshine TCP" `
+    -Direction Inbound -Protocol TCP -LocalPort @(47984,47989,47990,48010) -Action Allow `
+    -ErrorAction SilentlyContinue | Out-Null
+New-NetFirewallRule -Name "WMC-Sunshine-UDP" -DisplayName "WMC Sunshine UDP" `
+    -Direction Inbound -Protocol UDP -LocalPort @(47998,47999,48000,48002,48010) -Action Allow `
+    -ErrorAction SilentlyContinue | Out-Null
+Start-Service -Name "SunshineService" -ErrorAction SilentlyContinue
+Write-Host "  OK: Sunshine konfiguriert und gestartet"
 
-    # Sunshine-Firewall-Ports öffnen (TCP + UDP)
-    $tcpPorts = @(47984, 47989, 47990, 48010)
-    $udpPorts = @(47998, 47999, 48000, 48002, 48010)
-    New-NetFirewallRule -Name "WMC-Sunshine-TCP" -DisplayName "WMC Sunshine TCP" `
-        -Direction Inbound -Protocol TCP -LocalPort $tcpPorts -Action Allow `
-        -ErrorAction SilentlyContinue | Out-Null
-    New-NetFirewallRule -Name "WMC-Sunshine-UDP" -DisplayName "WMC Sunshine UDP" `
-        -Direction Inbound -Protocol UDP -LocalPort $udpPorts -Action Allow `
-        -ErrorAction SilentlyContinue | Out-Null
-    Write-Host "  Firewall-Regeln gesetzt (TCP + UDP)"
-
-    # Sunshine als Dienst starten
-    Start-Service -Name "SunshineService" -ErrorAction SilentlyContinue
-    Write-Host "  Sunshine-Dienst gestartet"
-}
-
-# ── 6. Auto-Login (Sysinternals AutoLogon) ────────────────────────────────────
-Write-Host "`n[6/7] Auto-Login einrichten..." -ForegroundColor Yellow
+# ── 6. Latenz-Optimierungen ───────────────────────────────────────────────────
 Write-Host ""
-Write-Host "  SICHERHEITSHINWEIS: Auto-Login bedeutet, dass jeder mit physischem Zugang" -ForegroundColor Yellow
-Write-Host "  zum PC sich ohne Passwort anmelden kann. Nur empfohlen wenn der PC an einem" -ForegroundColor Yellow
-Write-Host "  sicheren Ort steht." -ForegroundColor Yellow
-Write-Host ""
-$autoLoginChoice = Read-Host "  Auto-Login aktivieren? (j/n)"
-if ($autoLoginChoice -match "^[jJyY]") {
-    $currentUser   = $env:USERNAME
-    $userDomain    = if ($env:USERDOMAIN -eq $env:COMPUTERNAME) { "." } else { $env:USERDOMAIN }
-
-    $securePass = Read-Host "  Windows-Passwort für '$currentUser'" -AsSecureString
-    $bstr       = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($securePass)
-    $plainPass  = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
-    [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
-
-    # AutoLogon herunterladen und entpacken
-    $autoLogonZip = "$WmcDir\AutoLogon.zip"
-    $autoLogonDir = "$WmcDir\AutoLogon"
-    Write-Host "  Lade Sysinternals AutoLogon herunter..." -ForegroundColor Gray
-    Invoke-WebRequest -Uri "https://download.sysinternals.com/files/AutoLogon.zip" -OutFile $autoLogonZip
-    Expand-Archive -Path $autoLogonZip -DestinationPath $autoLogonDir -Force
-    Remove-Item $autoLogonZip -ErrorAction SilentlyContinue
-
-    $autoLogonExe = "$autoLogonDir\Autologon64.exe"
-    if (-not (Test-Path $autoLogonExe)) {
-        $autoLogonExe = "$autoLogonDir\Autologon.exe"
-    }
-
-    # AutoLogon silent ausführen
-    Start-Process -FilePath $autoLogonExe `
-        -ArgumentList "/AcceptEula", $currentUser, $userDomain, $plainPass `
-        -Wait -NoNewWindow
-
-    # Passwort aus dem Speicher löschen
-    $plainPass = $null
-
-    # Registry-Schlüssel prüfen
-    $autoAdminLogon = (Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" `
-        -Name AutoAdminLogon -ErrorAction SilentlyContinue).AutoAdminLogon
-    if ($autoAdminLogon -eq "1") {
-        Write-Host "  Auto-Login erfolgreich aktiviert für: $currentUser" -ForegroundColor Green
-    } else {
-        Write-Host "  Auto-Login konnte nicht verifiziert werden — bitte manuell prüfen." -ForegroundColor Red
+Write-Host "[6/$Steps] Latenz-Optimierungen" -ForegroundColor Yellow
+Write-Host "  Ultimate Performance, Interrupt Moderation off, HAGS, Nagle off."
+if (Test-Path "$PSScriptRoot\optimize_windows.ps1") {
+    try {
+        & "$PSScriptRoot\optimize_windows.ps1"
+    } catch {
+        Write-Host "  Teilweise fehlgeschlagen (unkritisch): $_" -ForegroundColor Yellow
     }
 } else {
-    Write-Host "  Auto-Login übersprungen. Moonlight kann nicht streamen wenn Windows auf dem Anmeldebildschirm ist." -ForegroundColor Gray
+    Write-Host "  optimize_windows.ps1 nicht gefunden -- uebersprungen" -ForegroundColor Gray
 }
 
-# ── 7. Zusammenfassung ────────────────────────────────────────────────────────
-Write-Host "`n[7/7] GPU-Treiber und BIOS-Erinnerung..." -ForegroundColor Yellow
-Write-Host "  Stelle sicher dass dein GPU-Treiber aktuell ist (GeForce Experience / AMD Software)"
-Write-Host "  Für NVIDIA: Hardware-Encoding (NVENC) ist ab GTX 900 Serie verfügbar"
-
-Write-Host "`n═══════════════════════════════════════════════════" -ForegroundColor Green
-Write-Host "  Setup abgeschlossen!" -ForegroundColor Green
+# ── 7. Auto-Login ─────────────────────────────────────────────────────────────
 Write-Host ""
-Write-Host "  MAC-Adresse (für Relay-Konfiguration):" -ForegroundColor White
+Write-Host "[7/$Steps] Auto-Login einrichten" -ForegroundColor Yellow
+Write-Host "  Damit Windows nach Wake-on-LAN automatisch einloggt und Sunshine startet."
+Write-Host ""
+Write-Host "  WICHTIG: Jeder mit physischem Zugang kann sich ohne Passwort anmelden." -ForegroundColor Yellow
+Write-Host "  Nur aktivieren wenn der PC sicher aufgestellt ist (z.B. Zuhause)." -ForegroundColor Yellow
+Write-Host ""
+$alChoice = Read-Host "  Auto-Login aktivieren? (j/n)"
+if ($alChoice -match "^[jJyY]") {
+    $user    = $env:USERNAME
+    $domain  = if ($env:USERDOMAIN -eq $env:COMPUTERNAME) { "." } else { $env:USERDOMAIN }
+    $secPass = Read-Host "  Windows-Passwort fuer '$user'" -AsSecureString
+    $bstr    = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secPass)
+    $plain   = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
+    [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+
+    $alZip = "$WmcDir\AutoLogon.zip"
+    $alDir = "$WmcDir\AutoLogon"
+    Write-Host "  Lade Sysinternals AutoLogon..." -ForegroundColor Gray
+    Invoke-WebRequest -Uri "https://download.sysinternals.com/files/AutoLogon.zip" -OutFile $alZip
+    Expand-Archive -Path $alZip -DestinationPath $alDir -Force
+    Remove-Item $alZip -ErrorAction SilentlyContinue
+    $alExe = if (Test-Path "$alDir\Autologon64.exe") { "$alDir\Autologon64.exe" } else { "$alDir\Autologon.exe" }
+    Start-Process -FilePath $alExe -ArgumentList "/AcceptEula", $user, $domain, $plain -Wait -NoNewWindow
+    $plain = $null
+
+    $check = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" `
+        -Name AutoAdminLogon -ErrorAction SilentlyContinue).AutoAdminLogon
+    if ($check -eq "1") {
+        Write-Host "  OK: Auto-Login aktiv fuer: $user"
+    } else {
+        Write-Host "  Konnte nicht verifiziert werden -- bitte manuell pruefen" -ForegroundColor Red
+    }
+} else {
+    Write-Host "  Uebersprungen. Hinweis: Moonlight kann nicht streamen solange Windows am Anmeldebildschirm ist." -ForegroundColor Gray
+}
+
+# ── 8. Tailscale ──────────────────────────────────────────────────────────────
+Write-Host ""
+Write-Host "[8/$Steps] Tailscale (sicheres VPN)" -ForegroundColor Yellow
+Write-Host "  Verbindet PC, Raspberry Pi und MacBook ueber das Internet ohne Port-Forwarding."
+if (-not (Get-Command tailscale -ErrorAction SilentlyContinue)) {
+    Write-Host "  Installiere Tailscale via winget..." -ForegroundColor Gray
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+        winget install --id Tailscale.Tailscale --silent --accept-package-agreements `
+            --accept-source-agreements
+        $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + `
+                    [System.Environment]::GetEnvironmentVariable("Path","User")
+        Write-Host "  OK: Tailscale installiert"
+    } else {
+        Write-Host "  Manuell: https://tailscale.com/download/windows" -ForegroundColor Yellow
+    }
+} else {
+    Write-Host "  OK: Tailscale bereits installiert"
+}
+Write-Host "  Tailscale starten und mit deinem Account einloggen!" -ForegroundColor Cyan
+
+# ── Zusammenfassung ───────────────────────────────────────────────────────────
+Write-Host ""
+Write-Host "══════════════════════════════════════════════════════" -ForegroundColor Green
+Write-Host "  Setup abgeschlossen!" -ForegroundColor Green
+Write-Host "══════════════════════════════════════════════════════" -ForegroundColor Green
+Write-Host ""
+Write-Host "  MAC-Adresse (fuer den Raspberry Pi notieren):" -ForegroundColor White
 Get-NetAdapter | Where-Object { $_.Status -eq "Up" } `
     | Select-Object Name, MacAddress | Format-Table -AutoSize
+Write-Host "  Lokale IP-Adresse:" -ForegroundColor White
+Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.PrefixOrigin -ne "WellKnown" } `
+    | Select-Object InterfaceAlias, IPAddress | Format-Table -AutoSize
 Write-Host ""
-Write-Host "  Nächste Schritte:" -ForegroundColor White
-Write-Host "  1. BIOS: Wake on LAN / Power on by PCIe aktivieren"
-Write-Host "  2. Sunshine Web-UI öffnen: https://localhost:47990"
-Write-Host "     (Benutzername + Passwort beim ersten Start setzen)"
-Write-Host "  3. Auf dem Mac: wmc stream"
-Write-Host "═══════════════════════════════════════════════════" -ForegroundColor Green
+Write-Host "  Naechste Schritte:" -ForegroundColor White
+Write-Host "  1. BIOS/UEFI: Wake on LAN aktivieren"
+Write-Host "     Neustart -> Entf/F2 -> 'Wake on LAN' oder 'Power on by PCIe'"
+Write-Host "  2. Tailscale starten und mit Account einloggen"
+Write-Host "  3. Sunshine Web-UI: Benutzername + Passwort setzen"
+Write-Host "     https://localhost:47990"
+Write-Host "  4. PC neu starten (damit alle Optimierungen greifen)"
+Write-Host ""
+Write-Host "  Weiter mit: Raspberry Pi einrichten (setup_relay.sh)" -ForegroundColor Cyan
