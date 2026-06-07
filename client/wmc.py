@@ -25,6 +25,7 @@ import urllib.request
 from pathlib import Path
 
 CONFIG_FILE = Path.home() / ".wmc.env"
+STATS_FILE = Path.home() / ".wmc_stats.json"
 
 # Pfade zu Moonlight auf macOS
 MOONLIGHT_PATHS = [
@@ -78,9 +79,50 @@ def api(cfg: dict, method: str, path: str) -> dict:
         try:
             return json.loads(body)
         except Exception:
-            return {"error": f"HTTP {e.code}: {body}"}
+            return {"error": f"HTTP {e.code}: {body}", "http_code": e.code}
     except Exception as e:
         return {"error": str(e)}
+
+
+# ── Notifications ─────────────────────────────────────────────────────────────
+
+def notify(title: str, message: str):
+    try:
+        subprocess.run([
+            "osascript", "-e",
+            f'display notification "{message}" with title "{title}" sound name "Glass"'
+        ], capture_output=True, timeout=3)
+    except Exception:
+        pass
+
+
+# ── Boot time learning ────────────────────────────────────────────────────────
+
+def load_stats() -> dict:
+    if STATS_FILE.exists():
+        try:
+            return json.loads(STATS_FILE.read_text())
+        except Exception:
+            pass
+    return {"boot_times": []}
+
+
+def save_boot_time(seconds: int):
+    stats = load_stats()
+    times = stats.get("boot_times", [])
+    times.append(seconds)
+    times = times[-10:]  # keep last 10
+    stats["boot_times"] = times
+    STATS_FILE.write_text(json.dumps(stats))
+
+
+def estimated_boot_time() -> str:
+    stats = load_stats()
+    times = stats.get("boot_times", [])
+    if not times:
+        return "~30–60s"
+    avg = int(sum(times) / len(times))
+    return f"~{avg}s (Ø letzte {len(times)} Starts)"
 
 
 # ── Commands ──────────────────────────────────────────────────────────────────
@@ -135,6 +177,47 @@ def wait_for_pc(cfg, timeout: int = 120) -> bool:
     return False
 
 
+def wait_for_sunshine(cfg, timeout: int = 30) -> bool:
+    """Wartet bis Sunshine bereit ist. Gibt True zurück wenn erfolgreich."""
+    spinners = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+    start = time.monotonic()
+    deadline = start + timeout
+    i = 0
+
+    while time.monotonic() < deadline:
+        elapsed = int(time.monotonic() - start)
+        spin = spinners[i % len(spinners)]
+        print(f"\r{spin} Warte auf Sunshine... {elapsed}s  ", end="", flush=True)
+
+        result = api(cfg, "GET", "/sunshine_ready")
+
+        # Old relay without this endpoint — fall back to a simple 10s wait
+        if result.get("http_code") == 404 or (
+            "error" in result and "HTTP 404" in result.get("error", "")
+        ):
+            print(f"\r⠋ Warte auf Sunshine... (fallback)  ", end="", flush=True)
+            for j in range(10):
+                elapsed2 = int(time.monotonic() - start)
+                spin2 = spinners[j % len(spinners)]
+                print(f"\r{spin2} Warte auf Sunshine... {elapsed2}s  ", end="", flush=True)
+                time.sleep(1)
+            total = int(time.monotonic() - start)
+            print(f"\r\033[32m✓\033[0m Sunshine bereit nach {total}s          ")
+            return True
+
+        if result.get("ok") or result.get("ready") is True:
+            total = int(time.monotonic() - start)
+            print(f"\r\033[32m✓\033[0m Sunshine bereit nach {total}s          ")
+            return True
+
+        i += 1
+        time.sleep(2)
+
+    elapsed = int(time.monotonic() - start)
+    print(f"\r\033[31m✗\033[0m Sunshine Timeout nach {elapsed}s              ")
+    return False
+
+
 def find_moonlight() -> str | None:
     for path in MOONLIGHT_PATHS:
         if os.path.isdir(path):
@@ -161,18 +244,16 @@ def cmd_stream(cfg):
         ok = cmd_wake(cfg, silent=True)
         if not ok:
             sys.exit(1)
-        print("PC wird gestartet…")
+        print(f"PC wird gestartet… (erwartet: {estimated_boot_time()})")
+        boot_start = time.monotonic()
         time.sleep(5)  # kurz warten bevor der erste Ping
         if not wait_for_pc(cfg, timeout=120):
             print("PC antwortet nicht nach 2 Minuten. BIOS Wake-on-LAN aktiviert?")
             sys.exit(1)
-        # Windows braucht nach dem Ping noch ~10s bis Sunshine bereit ist
-        print("Warte kurz bis Sunshine bereit ist…")
-        spinners = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-        for i in range(10):
-            print(f"\r{spinners[i % len(spinners)]} Warte auf Sunshine... {i+1}s  ", end="", flush=True)
-            time.sleep(1)
-        print(f"\r\033[32m✓\033[0m Sunshine bereit                ")
+        boot_time = int(time.monotonic() - boot_start)
+        save_boot_time(boot_time)
+        # Poll Sunshine readiness instead of blind sleep
+        wait_for_sunshine(cfg, timeout=30)
     elif pc_online is True:
         print("Gaming-PC ist bereits online.")
     else:
@@ -188,6 +269,7 @@ def cmd_stream(cfg):
 
     # Tailscale-IP des PCs für direkten Moonlight-Start
     pc_ip = cfg.get("WMC_PC_TAILSCALE_IP", "")
+    notify("WMC", "Gaming PC ist bereit — Moonlight startet")
     if pc_ip:
         print(f"Moonlight starten → {pc_ip}…")
         subprocess.Popen(["open", "-a", moonlight, "--args", pc_ip])

@@ -5,13 +5,14 @@ Receives authenticated commands from the internet and acts locally.
 """
 
 import os
+import secrets as _secrets
 import socket
 import struct
 import subprocess
 import time
 from functools import wraps
 
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, make_response, redirect
 
 app = Flask(__name__)
 
@@ -23,19 +24,184 @@ PC_AGENT_PORT = int(os.environ.get("WMC_AGENT_PORT", "9876"))
 WOL_BROADCAST = os.environ.get("WMC_WOL_BROADCAST", "255.255.255.255")
 WOL_PORT       = int(os.environ.get("WMC_WOL_PORT", "9"))
 
+# --- Session store ---
+_SESSIONS: dict[str, float] = {}   # token -> expiry timestamp
+SESSION_TTL = 60 * 60 * 24 * 30   # 30 days
+
+
+def _new_session_cookie() -> str:
+    return _secrets.token_hex(32)
+
+
+def _session_valid(token: str) -> bool:
+    expiry = _SESSIONS.get(token)
+    if expiry is None:
+        return False
+    if time.time() > expiry:
+        _SESSIONS.pop(token, None)
+        return False
+    return True
+
+
+def _create_session() -> str:
+    tok = _new_session_cookie()
+    _SESSIONS[tok] = time.time() + SESSION_TTL
+    return tok
+
 
 # --- Auth ---
 
 def require_token(f):
+    """Auth decorator for API routes (CLI + web UI).
+    Accepts: wmc_session cookie OR Bearer header token.
+    """
     @wraps(f)
     def wrapper(*args, **kwargs):
+        # 1. Session cookie (set by web UI login flow)
+        cookie = request.cookies.get("wmc_session", "")
+        if cookie and _session_valid(cookie):
+            return f(*args, **kwargs)
+        # 2. Bearer token (CLI)
         auth = request.headers.get("Authorization", "")
-        # Bearer token im Header (CLI) oder ?token= Query-Parameter (iPhone Web-UI)
-        token = auth[7:] if auth.startswith("Bearer ") else request.args.get("token", "")
-        if token != API_TOKEN:
-            return jsonify({"error": "Unauthorized"}), 401
-        return f(*args, **kwargs)
+        token = auth[7:] if auth.startswith("Bearer ") else ""
+        if token and token == API_TOKEN:
+            return f(*args, **kwargs)
+        return jsonify({"error": "Unauthorized"}), 401
     return wrapper
+
+
+def require_session_or_token(f):
+    """Auth decorator for the web UI GET / route.
+    Handles session cookies, ?token= param, and login form.
+    """
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        # 1. Valid session cookie -> serve page
+        cookie = request.cookies.get("wmc_session", "")
+        if cookie and _session_valid(cookie):
+            return f(*args, **kwargs)
+
+        # 2. POST /?login=1 — handle login form submission
+        if request.method == "POST" and request.args.get("login") == "1":
+            form_token = request.form.get("token", "")
+            if form_token == API_TOKEN:
+                session_tok = _create_session()
+                resp = make_response(redirect("/", 302))
+                resp.set_cookie(
+                    "wmc_session", session_tok,
+                    max_age=SESSION_TTL, httponly=True,
+                    samesite="Lax", secure=False  # set secure=True if behind HTTPS
+                )
+                return resp
+            return _login_page("Falsches Passwort."), 401
+
+        # 3. ?token= query param OR Bearer header -> create session and serve
+        query_token = request.args.get("token", "")
+        auth = request.headers.get("Authorization", "")
+        bearer_token = auth[7:] if auth.startswith("Bearer ") else ""
+        candidate = query_token or bearer_token
+        if candidate == API_TOKEN:
+            session_tok = _create_session()
+            resp = make_response(f(*args, **kwargs))
+            resp.set_cookie(
+                "wmc_session", session_tok,
+                max_age=SESSION_TTL, httponly=True,
+                samesite="Lax", secure=False
+            )
+            return resp
+
+        # 4. Nothing valid -> show login page
+        return _login_page(), 200
+    return wrapper
+
+
+LOGIN_HTML = """<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Gaming PC – Anmelden</title>
+  <style>
+    *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    :root {{
+      --bg: #0f0f13;
+      --surface: #1c1c24;
+      --border: #2e2e3e;
+      --text: #e8e8f0;
+      --muted: #888899;
+      --blue: #3b82f6;
+      --red: #ef4444;
+    }}
+    body {{
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      min-height: 100dvh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }}
+    .card {{
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 32px 28px;
+      width: 100%;
+      max-width: 360px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }}
+    h1 {{ font-size: 1.3rem; font-weight: 700; letter-spacing: -0.4px; }}
+    .error {{ color: var(--red); font-size: 0.9rem; }}
+    label {{ font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; display: block; margin-bottom: 6px; }}
+    input[type=password] {{
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text);
+      font-size: 1rem;
+      padding: 12px 14px;
+      outline: none;
+    }}
+    input[type=password]:focus {{ border-color: var(--blue); }}
+    button[type=submit] {{
+      width: 100%;
+      background: var(--blue);
+      color: #fff;
+      border: none;
+      border-radius: 12px;
+      padding: 14px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }}
+    button[type=submit]:active {{ opacity: 0.8; }}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>&#127918; Gaming PC</h1>
+    {error_html}
+    <form method="POST" action="/?login=1">
+      <label for="tok">Passwort</label>
+      <input type="password" id="tok" name="token" autocomplete="current-password" autofocus>
+      <br><br>
+      <button type="submit">Anmelden</button>
+    </form>
+  </div>
+</body>
+</html>"""
+
+
+def _login_page(error: str = "") -> str:
+    error_html = f'<div class="error">{error}</div>' if error else ""
+    return LOGIN_HTML.format(error_html=error_html)
 
 
 # --- Wake-on-LAN ---
@@ -243,8 +409,7 @@ MOBILE_HTML = """<!DOCTYPE html>
   <div class="toast" id="toast"></div>
 
   <script>
-    const TOKEN = "{token}";
-    const BASE  = window.location.origin;
+    const BASE = window.location.origin;
 
     function showToast(msg, duration = 3000) {{
       const t = document.getElementById("toast");
@@ -257,7 +422,7 @@ MOBILE_HTML = """<!DOCTYPE html>
     async function refreshStatus() {{
       try {{
         const r = await fetch(BASE + "/status", {{
-          headers: {{ "Authorization": "Bearer " + TOKEN }}
+          credentials: "include"
         }});
         const d = await r.json();
         const dot = document.getElementById("dot");
@@ -283,7 +448,7 @@ MOBILE_HTML = """<!DOCTYPE html>
       try {{
         const r = await fetch(BASE + path, {{
           method: "POST",
-          headers: {{ "Authorization": "Bearer " + TOKEN }}
+          credentials: "include"
         }});
         const d = await r.json();
         if (d.ok) {{
@@ -315,11 +480,10 @@ MOBILE_HTML = """<!DOCTYPE html>
 </html>"""
 
 
-@app.route("/", methods=["GET"])
-@require_token
+@app.route("/", methods=["GET", "POST"])
+@require_session_or_token
 def mobile_ui():
-    html = MOBILE_HTML.replace("{token}", API_TOKEN)
-    return html, 200, {"Content-Type": "text/html; charset=utf-8"}
+    return MOBILE_HTML, 200, {"Content-Type": "text/html; charset=utf-8"}
 
 
 # --- Routes ---
@@ -328,10 +492,18 @@ def mobile_ui():
 @require_token
 def status():
     online = pc_is_online(PC_IP)
+    sunshine_ready = False
+    if PC_IP and online:
+        try:
+            result = forward_to_agent("sunshine_status")
+            sunshine_ready = result.get("response", "").strip() == "ready"
+        except Exception:
+            sunshine_ready = False
     return jsonify({
         "pc_online": online,
         "pc_ip": PC_IP or "not configured",
         "relay": "ok",
+        "sunshine_ready": sunshine_ready,
     })
 
 
@@ -371,6 +543,14 @@ def hibernate():
 def lock():
     result = forward_to_agent("lock")
     return jsonify(result), 200 if result.get("ok") else 502
+
+
+@app.route("/sunshine_ready", methods=["GET"])
+@require_token
+def sunshine_ready():
+    result = forward_to_agent("sunshine_status")
+    ready = result.get("response", "").strip() == "ready"
+    return jsonify({"ready": ready})
 
 
 if __name__ == "__main__":
