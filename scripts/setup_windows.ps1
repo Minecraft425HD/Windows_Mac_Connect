@@ -17,7 +17,7 @@ Write-Host "=== WMC Windows Setup ===" -ForegroundColor Cyan
 New-Item -ItemType Directory -Force -Path $WmcDir | Out-Null
 
 # ── 1. Wake-on-LAN ────────────────────────────────────────────────────────────
-Write-Host "`n[1/6] Wake-on-LAN aktivieren..." -ForegroundColor Yellow
+Write-Host "`n[1/7] Wake-on-LAN aktivieren..." -ForegroundColor Yellow
 Get-NetAdapter | Where-Object { $_.Status -eq "Up" } | ForEach-Object {
     $name = $_.Name
     foreach ($kw in @("WakeOnMagicPacket", "*WakeOnMagicPacket", "*WakeOnPattern")) {
@@ -166,8 +166,58 @@ address_family = both
     Write-Host "  Sunshine-Dienst gestartet"
 }
 
-# ── 6. Zusammenfassung ────────────────────────────────────────────────────────
-Write-Host "`n[6/6] GPU-Treiber und BIOS-Erinnerung..." -ForegroundColor Yellow
+# ── 6. Auto-Login (Sysinternals AutoLogon) ────────────────────────────────────
+Write-Host "`n[6/7] Auto-Login einrichten..." -ForegroundColor Yellow
+Write-Host ""
+Write-Host "  SICHERHEITSHINWEIS: Auto-Login bedeutet, dass jeder mit physischem Zugang" -ForegroundColor Yellow
+Write-Host "  zum PC sich ohne Passwort anmelden kann. Nur empfohlen wenn der PC an einem" -ForegroundColor Yellow
+Write-Host "  sicheren Ort steht." -ForegroundColor Yellow
+Write-Host ""
+$autoLoginChoice = Read-Host "  Auto-Login aktivieren? (j/n)"
+if ($autoLoginChoice -match "^[jJyY]") {
+    $currentUser   = $env:USERNAME
+    $userDomain    = if ($env:USERDOMAIN -eq $env:COMPUTERNAME) { "." } else { $env:USERDOMAIN }
+
+    $securePass = Read-Host "  Windows-Passwort für '$currentUser'" -AsSecureString
+    $bstr       = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($securePass)
+    $plainPass  = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
+    [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+
+    # AutoLogon herunterladen und entpacken
+    $autoLogonZip = "$WmcDir\AutoLogon.zip"
+    $autoLogonDir = "$WmcDir\AutoLogon"
+    Write-Host "  Lade Sysinternals AutoLogon herunter..." -ForegroundColor Gray
+    Invoke-WebRequest -Uri "https://download.sysinternals.com/files/AutoLogon.zip" -OutFile $autoLogonZip
+    Expand-Archive -Path $autoLogonZip -DestinationPath $autoLogonDir -Force
+    Remove-Item $autoLogonZip -ErrorAction SilentlyContinue
+
+    $autoLogonExe = "$autoLogonDir\Autologon64.exe"
+    if (-not (Test-Path $autoLogonExe)) {
+        $autoLogonExe = "$autoLogonDir\Autologon.exe"
+    }
+
+    # AutoLogon silent ausführen
+    Start-Process -FilePath $autoLogonExe `
+        -ArgumentList "/AcceptEula", $currentUser, $userDomain, $plainPass `
+        -Wait -NoNewWindow
+
+    # Passwort aus dem Speicher löschen
+    $plainPass = $null
+
+    # Registry-Schlüssel prüfen
+    $autoAdminLogon = (Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" `
+        -Name AutoAdminLogon -ErrorAction SilentlyContinue).AutoAdminLogon
+    if ($autoAdminLogon -eq "1") {
+        Write-Host "  Auto-Login erfolgreich aktiviert für: $currentUser" -ForegroundColor Green
+    } else {
+        Write-Host "  Auto-Login konnte nicht verifiziert werden — bitte manuell prüfen." -ForegroundColor Red
+    }
+} else {
+    Write-Host "  Auto-Login übersprungen. Moonlight kann nicht streamen wenn Windows auf dem Anmeldebildschirm ist." -ForegroundColor Gray
+}
+
+# ── 7. Zusammenfassung ────────────────────────────────────────────────────────
+Write-Host "`n[7/7] GPU-Treiber und BIOS-Erinnerung..." -ForegroundColor Yellow
 Write-Host "  Stelle sicher dass dein GPU-Treiber aktuell ist (GeForce Experience / AMD Software)"
 Write-Host "  Für NVIDIA: Hardware-Encoding (NVENC) ist ab GTX 900 Serie verfügbar"
 

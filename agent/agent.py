@@ -26,11 +26,34 @@ COMMANDS = {
 }
 
 
+def check_sunshine() -> str:
+    # Check if SunshineService is running
+    try:
+        result = subprocess.run(
+            ["sc", "query", "SunshineService"],
+            capture_output=True, text=True, timeout=3
+        )
+        if "RUNNING" not in result.stdout:
+            return "not_running"
+    except Exception:
+        return "error"
+    # Check if port 47990 is accepting connections
+    try:
+        with socket.create_connection(("127.0.0.1", 47990), timeout=2):
+            pass
+        return "ready"
+    except Exception:
+        return "starting"
+
+
 def handle_client(conn: socket.socket, addr):
     try:
         data = conn.recv(64).decode().strip().lower()
         if data == "ping":
             conn.sendall(b"pong\n")
+            return
+        if data == "sunshine_status":
+            conn.sendall(f"{check_sunshine()}\n".encode())
             return
         if data in COMMANDS:
             subprocess.Popen(COMMANDS[data], shell=False)
