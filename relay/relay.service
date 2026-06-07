@@ -1,0 +1,22 @@
+# systemd unit — copy to /etc/systemd/system/wmc-relay.service
+# then: sudo systemctl enable --now wmc-relay
+
+[Unit]
+Description=WMC Relay Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=wmc
+WorkingDirectory=/opt/wmc/relay
+EnvironmentFile=/etc/wmc/relay.env
+ExecStart=/opt/wmc/venv/bin/gunicorn \
+    --bind 127.0.0.1:8765 \
+    --workers 1 \
+    --timeout 30 \
+    relay_server:app
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
