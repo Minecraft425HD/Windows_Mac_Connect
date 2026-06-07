@@ -2,17 +2,22 @@
 """
 wmc — Windows-Mac Connect CLI
 Usage:
-    wmc status
-    wmc wake
-    wmc stream      Wake PC + Moonlight starten (niedrigste Latenz)
-    wmc shutdown
-    wmc sleep
-    wmc hibernate
-    wmc lock
-    wmc ping        Netzwerk-Latenz zum PC messen
-    wmc config
+    wmc [-p <profil>] <befehl>
 
-Config: ~/.wmc.env  oder Umgebungsvariablen WMC_RELAY_URL, WMC_API_TOKEN
+    wmc stream              PC einschalten + Moonlight starten
+    wmc status              Ist der Gaming-PC online?
+    wmc wake                Nur einschalten (Wake-on-LAN)
+    wmc ping                Latenz + Tailscale Direct/Relay prüfen
+    wmc shutdown            Herunterfahren
+    wmc sleep               Schlafen legen
+    wmc hibernate           Ruhezustand
+    wmc lock                Bildschirm sperren
+    wmc profiles            Alle Profile anzeigen
+    wmc config              Standardprofil konfigurieren
+    wmc -p gaming config    Profil 'gaming' konfigurieren
+
+Config: ~/.wmc/profiles/<name>.env  oder ~/.wmc.env (legacy)
+        oder Umgebungsvariablen WMC_RELAY_URL, WMC_API_TOKEN
 """
 
 import json
@@ -24,7 +29,9 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-CONFIG_FILE = Path.home() / ".wmc.env"
+CONFIG_DIR = Path.home() / ".wmc"
+PROFILES_DIR = CONFIG_DIR / "profiles"
+LEGACY_CONFIG = Path.home() / ".wmc.env"
 STATS_FILE = Path.home() / ".wmc_stats.json"
 
 # Pfade zu Moonlight auf macOS
@@ -36,10 +43,25 @@ MOONLIGHT_PATHS = [
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-def load_config() -> dict:
+def get_profile_path(name: str) -> Path:
+    return PROFILES_DIR / f"{name}.env"
+
+
+def list_profiles() -> list[str]:
+    if not PROFILES_DIR.exists():
+        return ["default"] if LEGACY_CONFIG.exists() else []
+    names = [p.stem for p in sorted(PROFILES_DIR.glob("*.env"))]
+    return names
+
+
+def load_config(profile: str = "default") -> dict:
     cfg = {}
-    if CONFIG_FILE.exists():
-        for line in CONFIG_FILE.read_text().splitlines():
+    # Legacy fallback
+    path = get_profile_path(profile)
+    if not path.exists() and profile == "default" and LEGACY_CONFIG.exists():
+        path = LEGACY_CONFIG
+    if path.exists():
+        for line in path.read_text().splitlines():
             line = line.strip()
             if line and not line.startswith("#") and "=" in line:
                 k, _, v = line.partition("=")
@@ -47,14 +69,19 @@ def load_config() -> dict:
     for key in ("WMC_RELAY_URL", "WMC_API_TOKEN", "WMC_PC_TAILSCALE_IP"):
         if key in os.environ:
             cfg[key] = os.environ[key]
+    cfg["_profile"] = profile
     return cfg
 
 
 def require_config(cfg: dict):
     missing = [k for k in ("WMC_RELAY_URL", "WMC_API_TOKEN") if not cfg.get(k)]
     if missing:
+        profile = cfg.get("_profile", "default")
         print(f"Fehlende Konfiguration: {', '.join(missing)}")
-        print(f"Ausführen:  wmc config   oder {CONFIG_FILE} bearbeiten")
+        if profile == "default":
+            print(f"Ausführen:  wmc config")
+        else:
+            print(f"Ausführen:  wmc -p {profile} config")
         sys.exit(1)
 
 
@@ -275,7 +302,7 @@ def cmd_stream(cfg):
         subprocess.Popen(["open", "-a", moonlight, "--args", pc_ip])
     else:
         print("Moonlight starten…")
-        print("(Tipp: WMC_PC_TAILSCALE_IP in ~/.wmc.env setzen für direkten Start)")
+        print("(Tipp: WMC_PC_TAILSCALE_IP in der Profil-Konfiguration setzen für direkten Start)")
         subprocess.Popen(["open", moonlight])
 
     print("\033[32mViel Spaß!\033[0m")
@@ -391,51 +418,80 @@ def cmd_power(cfg, action: str):
         print(f"Fehler: {result.get('error', result)}")
 
 
-def cmd_config():
-    print(f"Konfigurationsdatei: {CONFIG_FILE}")
-    print()
+def cmd_config(profile: str = "default"):
+    PROFILES_DIR.mkdir(parents=True, exist_ok=True)
+    path = get_profile_path(profile)
+    print(f"Profil '{profile}' konfigurieren: {path}")
     relay = input("Relay URL (z.B. http://100.64.0.2:8765): ").strip()
     token = input("API Token: ").strip()
-    pc_ip = input("Tailscale-IP des Gaming-PCs (optional, für 'wmc stream'): ").strip()
+    pc_ip = input("Tailscale-IP des Gaming-PCs (optional): ").strip()
     if not relay or not token:
         print("Abgebrochen.")
         sys.exit(1)
-    lines = [
-        f"WMC_RELAY_URL={relay}",
-        f"WMC_API_TOKEN={token}",
-    ]
+    lines = [f"WMC_RELAY_URL={relay}", f"WMC_API_TOKEN={token}"]
     if pc_ip:
         lines.append(f"WMC_PC_TAILSCALE_IP={pc_ip}")
-    CONFIG_FILE.write_text("\n".join(lines) + "\n")
-    CONFIG_FILE.chmod(0o600)
-    print(f"Gespeichert: {CONFIG_FILE}")
+    path.write_text("\n".join(lines) + "\n")
+    path.chmod(0o600)
+    print(f"Gespeichert: {path}")
+
+
+def cmd_profiles():
+    profiles = list_profiles()
+    if not profiles:
+        print("Keine Profile. Erstellen mit: wmc config")
+        return
+    print("Profile:")
+    for p in profiles:
+        print(f"  {p}   (wmc -p {p} stream)")
 
 
 USAGE = """
-wmc — Windows-Mac Connect
+wmc [-p <profil>] <befehl>
 
-  wmc stream      PC einschalten + Moonlight starten  ← Hauptbefehl
-  wmc status      Ist der Gaming-PC online?
-  wmc wake        Nur einschalten (Wake-on-LAN)
-  wmc ping        Netzwerk-Latenz messen
-  wmc shutdown    Herunterfahren
-  wmc sleep       Schlafen legen
-  wmc hibernate   Ruhezustand (Strom aus, WoL möglich)
-  wmc lock        Windows-Bildschirm sperren
-  wmc config      Relay-URL und API-Token konfigurieren
+  wmc stream              PC einschalten + Moonlight starten
+  wmc status              Ist der Gaming-PC online?
+  wmc wake                Nur einschalten (Wake-on-LAN)
+  wmc ping                Latenz + Tailscale Direct/Relay prüfen
+  wmc shutdown            Herunterfahren
+  wmc sleep               Schlafen legen
+  wmc hibernate           Ruhezustand
+  wmc lock                Bildschirm sperren
+  wmc profiles            Alle Profile anzeigen
+  wmc config              Standardprofil konfigurieren
+  wmc -p gaming config    Profil 'gaming' konfigurieren
+
+Beispiel mit mehreren PCs:
+  wmc -p gaming stream
+  wmc -p büro shutdown
 """
 
 
+def parse_args(args):
+    profile = "default"
+    if len(args) >= 2 and args[0] in ("-p", "--profile"):
+        profile = args[1]
+        args = args[2:]
+    return profile, args
+
+
 def main():
-    cfg = load_config()
-    args = sys.argv[1:]
-    if not args or args[0] in ("-h", "--help", "help"):
+    raw_args = sys.argv[1:]
+    if not raw_args or raw_args[0] in ("-h", "--help", "help"):
+        print(USAGE)
+        return
+    profile, args = parse_args(raw_args)
+    if not args:
         print(USAGE)
         return
     cmd = args[0]
     if cmd == "config":
-        cmd_config()
+        cmd_config(profile)
         return
+    if cmd == "profiles":
+        cmd_profiles()
+        return
+    cfg = load_config(profile)
     require_config(cfg)
     if cmd == "status":
         cmd_status(cfg)
