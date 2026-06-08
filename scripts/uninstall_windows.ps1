@@ -1,4 +1,4 @@
-﻿# uninstall_windows.ps1 - Gaming-PC (als Administrator ausführen)
+﻿﻿# uninstall_windows.ps1 - Gaming-PC (als Administrator ausführen)
 # Macht ALLE Änderungen von setup_windows.ps1 und optimize_windows.ps1 rückgängig
 
 #Requires -RunAsAdministrator
@@ -36,16 +36,13 @@ Write-Host ""
 
 # -- 1. WMC Agent stoppen und entfernen ---------------------------------------
 Write-Host "[1/$Steps] WMC Agent entfernen" -ForegroundColor Yellow
-$nssmPath = "$WmcDir\nssm.exe"
-if (Test-Path $nssmPath) {
-    & $nssmPath stop   WMCAgent 2>$null
-    & $nssmPath remove WMCAgent confirm 2>$null
-    Write-Host "  OK: WMC Agent Dienst entfernt"
-} else {
-    Stop-Service WMCAgent -ErrorAction SilentlyContinue
-    sc.exe delete WMCAgent 2>$null
-    Write-Host "  OK: WMC Agent entfernt (via sc.exe)"
-}
+Stop-ScheduledTask -TaskName "WMCAgent" -ErrorAction SilentlyContinue
+Unregister-ScheduledTask -TaskName "WMCAgent" -Confirm:$false -ErrorAction SilentlyContinue
+[System.Environment]::SetEnvironmentVariable("WMC_AGENT_PORT", $null, "Machine")
+[System.Environment]::SetEnvironmentVariable("WMC_AGENT_BIND", $null, "Machine")
+Stop-Service WMCAgent -ErrorAction SilentlyContinue
+sc.exe delete WMCAgent 2>$null
+Write-Host "  OK: WMC Agent entfernt"
 
 # -- 2. Sunshine stoppen und deinstallieren -----------------------------------
 Write-Host ""

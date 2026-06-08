@@ -1,4 +1,4 @@
-﻿# setup_windows.ps1 - Gaming-PC (als Administrator ausführen)
+﻿﻿# setup_windows.ps1 - Gaming-PC (als Administrator ausführen)
 # Richtet vollautomatisch ein:
 #   Wake-on-LAN - OpenSSH - Python - WMC Agent - Sunshine - Auto-Login - Tailscale
 
@@ -12,7 +12,6 @@ param(
 $ErrorActionPreference = "Continue"
 $WmcDir   = "C:\WMC"
 $AgentDir = "$WmcDir\agent"
-$NssmPath = "$WmcDir\nssm.exe"
 $Steps    = 8
 
 New-Item -ItemType Directory -Force -Path $WmcDir | Out-Null
@@ -80,28 +79,49 @@ Write-Host "  OK: $((python --version 2>&1))"
 Write-Host ""
 Write-Host "[4/$Steps] WMC Agent installieren" -ForegroundColor Yellow
 Write-Host "  Empfaengt Fernbefehle: Herunterfahren, Schlafen, Sperren."
-if (-not (Test-Path $NssmPath)) {
-    Write-Host "  Lade NSSM (Service Manager)..." -ForegroundColor Gray
-    $zip = "$WmcDir\nssm.zip"
-    Invoke-WebRequest -Uri "https://nssm.cc/release/nssm-2.24.zip" -OutFile $zip
-    Expand-Archive -Path $zip -DestinationPath "$WmcDir\nssm_tmp" -Force
-    Copy-Item "$WmcDir\nssm_tmp\nssm-2.24\win64\nssm.exe" $NssmPath
-    Remove-Item -Recurse -Force "$WmcDir\nssm_tmp", $zip
-}
 New-Item -ItemType Directory -Force -Path $AgentDir | Out-Null
 Copy-Item -Force "$PSScriptRoot\..\agent\agent.py" "$AgentDir\agent.py"
-& $NssmPath stop   WMCAgent 2>$null
-& $NssmPath remove WMCAgent confirm 2>$null
-& $NssmPath install WMCAgent (Get-Command python).Source "$AgentDir\agent.py" 2>$null
-& $NssmPath set WMCAgent AppEnvironmentExtra "WMC_AGENT_PORT=$AgentPort" "WMC_AGENT_BIND=$BindHost"
-& $NssmPath set WMCAgent Start SERVICE_AUTO_START
-& $NssmPath set WMCAgent AppStdout "C:\WMC\agent.log"
-& $NssmPath set WMCAgent AppStderr "C:\WMC\agent_err.log"
-Start-Service WMCAgent -ErrorAction SilentlyContinue
+
+# Wrapper-Skript damit Task Scheduler den Agent ohne Fenster startet
+$wrapperContent = "@echo off`r`nset WMC_AGENT_PORT=$AgentPort`r`nset WMC_AGENT_BIND=$BindHost`r`npython `"$AgentDir\agent.py`" >> `"C:\WMC\agent.log`" 2>&1"
+Set-Content -Path "$AgentDir\start_agent.bat" -Value $wrapperContent -Encoding ASCII
+
+# Task Scheduler (kein externer Download noetig)
+$pythonExe = (Get-Command python -ErrorAction SilentlyContinue).Source
+if (-not $pythonExe) { $pythonExe = "python" }
+
+$action  = New-ScheduledTaskAction -Execute $pythonExe `
+               -Argument "`"$AgentDir\agent.py`"" `
+               -WorkingDirectory $AgentDir
+$trigger = New-ScheduledTaskTrigger -AtStartup
+$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0 -RestartCount 3 `
+               -RestartInterval (New-TimeSpan -Minutes 1) -StartWhenAvailable
+$principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+$envPath  = [System.Environment]::GetEnvironmentVariable("PATH","Machine")
+
+Unregister-ScheduledTask -TaskName "WMCAgent" -Confirm:$false -ErrorAction SilentlyContinue
+Register-ScheduledTask -TaskName "WMCAgent" -Action $action -Trigger $trigger `
+    -Settings $settings -Principal $principal -Description "WMC Remote Agent" `
+    -ErrorAction SilentlyContinue | Out-Null
+
+# Umgebungsvariablen fuer den Task setzen
+$task = Get-ScheduledTask -TaskName "WMCAgent" -ErrorAction SilentlyContinue
+if ($task) {
+    $task.Principal.RunLevel = "Highest"
+    $envVars = @("WMC_AGENT_PORT=$AgentPort", "WMC_AGENT_BIND=$BindHost")
+    # Umgebungsvariablen via Registry setzen (Task Scheduler liest SYSTEM-Env)
+    [System.Environment]::SetEnvironmentVariable("WMC_AGENT_PORT", $AgentPort, "Machine")
+    [System.Environment]::SetEnvironmentVariable("WMC_AGENT_BIND", $BindHost, "Machine")
+    Start-ScheduledTask -TaskName "WMCAgent" -ErrorAction SilentlyContinue
+    Write-Host "  OK: WMC Agent als geplanter Task registriert (Port $AgentPort)"
+} else {
+    Write-Host "  WARNUNG: Task Scheduler Registrierung fehlgeschlagen" -ForegroundColor Yellow
+    Write-Host "  Agent manuell starten: python $AgentDir\agent.py" -ForegroundColor Yellow
+}
+
 New-NetFirewallRule -Name "WMC-Agent" -DisplayName "WMC Agent" `
     -Direction Inbound -Protocol TCP -LocalPort $AgentPort -Action Allow `
     -ErrorAction SilentlyContinue | Out-Null
-Write-Host "  OK: WMC Agent laeuft als Windows-Dienst (Port $AgentPort)"
 
 # -- 5. Sunshine ---------------------------------------------------------------
 Write-Host ""
