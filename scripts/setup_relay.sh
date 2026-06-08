@@ -173,7 +173,7 @@ if ! grep -q "$MARKER" "$BASHRC" 2>/dev/null; then
     cat >> "$BASHRC" <<'AUTOSTART'
 
 # WMC Dashboard auto-start
-if [[ $- == *i* ]] && [[ -z "$WMC_NO_DASH" ]]; then
+if [[ -t 1 ]] && [[ -z "$WMC_NO_DASH" ]]; then
     wmc-dash
 fi
 AUTOSTART

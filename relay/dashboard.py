@@ -255,6 +255,9 @@ def main(stdscr):
     curses.curs_set(0)
     curses.start_color()
     curses.use_default_colors()
+    curses.noecho()
+    curses.cbreak()
+    stdscr.keypad(True)
     stdscr.nodelay(True)
     stdscr.timeout(250)
 
