@@ -148,6 +148,31 @@ systemctl restart wmc-relay
 sleep 2
 systemctl restart wmc-watchdog
 
+# ── Dashboard installieren ────────────────────────────────────────────────────
+cp "$REPO_ROOT/relay/dashboard.py" "$INSTALL_DIR/relay/"
+chmod +x "$INSTALL_DIR/relay/dashboard.py"
+
+# wmc-dash Befehl global verfuegbar machen
+cat > /usr/local/bin/wmc-dash <<'DASH'
+#!/usr/bin/env bash
+exec /opt/wmc/venv/bin/python3 /opt/wmc/relay/dashboard.py
+DASH
+chmod +x /usr/local/bin/wmc-dash
+
+# Dashboard beim SSH-Login automatisch starten (nur fuer interaktive Sessions)
+BASHRC="/root/.bashrc"
+MARKER="# WMC Dashboard auto-start"
+if ! grep -q "$MARKER" "$BASHRC" 2>/dev/null; then
+    cat >> "$BASHRC" <<'AUTOSTART'
+
+# WMC Dashboard auto-start
+if [[ $- == *i* ]] && [[ -z "$WMC_NO_DASH" ]]; then
+    wmc-dash
+fi
+AUTOSTART
+    echo "  OK: Dashboard startet automatisch beim SSH-Login"
+fi
+
 # ── 6. Services pruefen ───────────────────────────────────────────────────────
 echo ""
 echo "[6/$STEPS] Services pruefen"
