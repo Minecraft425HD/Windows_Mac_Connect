@@ -19,11 +19,24 @@ BIND_HOST  = os.environ.get("WMC_AGENT_BIND", "0.0.0.0")
 COMMANDS = {
     "shutdown":  ["shutdown", "/s", "/t", "10", "/c", "WMC remote shutdown"],
     "reboot":    ["shutdown", "/r", "/t", "10", "/c", "WMC remote reboot"],
-    "sleep":     ["rundll32.exe", "powrprof.dll,SetSuspendState", "0,1,0"],
+    "sleep":     ["rundll32.exe", "powrprof.dll,SetSuspendState", "0,0,0"],
     "hibernate": ["shutdown", "/h"],
     "lock":      ["rundll32.exe", "user32.dll,LockWorkStation"],
     "cancel":    ["shutdown", "/a"],
 }
+
+
+def wake_display():
+    """Wake display from Modern Standby / turn on monitor."""
+    import ctypes
+    # Send mouse move to wake display
+    ctypes.windll.user32.mouse_event(0x0001, 1, 0, 0, 0)
+    ctypes.windll.user32.mouse_event(0x0001, -1, 0, 0, 0)
+    # Also send key press (shift) to ensure wakeup
+    ctypes.windll.user32.keybd_event(0x10, 0, 0, 0)
+    ctypes.windll.user32.keybd_event(0x10, 0, 0x0002, 0)
+    # Power on monitor via SetThreadExecutionState
+    ctypes.windll.kernel32.SetThreadExecutionState(0x80000002)
 
 
 def check_sunshine() -> str:
@@ -54,6 +67,10 @@ def handle_client(conn: socket.socket, addr):
             return
         if data == "sunshine_status":
             conn.sendall(f"{check_sunshine()}\n".encode())
+            return
+        if data == "wake_display":
+            wake_display()
+            conn.sendall(b"ok: display woken\n")
             return
         if data in COMMANDS:
             subprocess.Popen(COMMANDS[data], shell=False)

@@ -512,6 +512,14 @@ def status():
 @require_token
 def wake():
     try:
+        # If PC is already online (Modern Standby), wake the display via agent
+        if PC_IP and pc_is_online(PC_IP):
+            try:
+                forward_to_agent("wake_display")
+            except Exception:
+                pass
+            return jsonify({"ok": True, "message": "Display woken (PC was already online)", "macs": PC_MACS})
+        # PC is off -> send WoL magic packet
         for mac in PC_MACS:
             send_wol(mac)
         return jsonify({"ok": True, "message": "Magic packet sent", "macs": PC_MACS})
