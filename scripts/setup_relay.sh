@@ -134,7 +134,7 @@ User=wmc
 WorkingDirectory=/opt/wmc/relay
 EnvironmentFile=/etc/wmc/relay.env
 ExecStart=/opt/wmc/venv/bin/gunicorn \
-    --bind 0.0.0.0:${WMC_RELAY_PORT:-8765} \
+    --bind 0.0.0.0:8765 \
     --workers 1 \
     --timeout 30 \
     relay_server:app
