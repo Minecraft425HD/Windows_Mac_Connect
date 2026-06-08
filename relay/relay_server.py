@@ -18,7 +18,8 @@ app = Flask(__name__)
 
 # --- Config (set via environment variables) ---
 API_TOKEN = os.environ["WMC_API_TOKEN"]         # shared secret, min 32 chars
-PC_MAC    = os.environ["WMC_PC_MAC"]            # e.g. "AA:BB:CC:DD:EE:FF"
+PC_MAC    = os.environ["WMC_PC_MAC"]            # e.g. "AA:BB:CC:DD:EE:FF" or comma-separated for WLAN+LAN
+PC_MACS   = [m.strip() for m in PC_MAC.split(",") if m.strip()]
 PC_IP     = os.environ.get("WMC_PC_IP", "")    # for status ping (optional but recommended)
 PC_AGENT_PORT = int(os.environ.get("WMC_AGENT_PORT", "9876"))
 WOL_BROADCAST = os.environ.get("WMC_WOL_BROADCAST", "255.255.255.255")
@@ -511,8 +512,9 @@ def status():
 @require_token
 def wake():
     try:
-        send_wol(PC_MAC)
-        return jsonify({"ok": True, "message": "Magic packet sent", "mac": PC_MAC})
+        for mac in PC_MACS:
+            send_wol(mac)
+        return jsonify({"ok": True, "message": "Magic packet sent", "macs": PC_MACS})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
