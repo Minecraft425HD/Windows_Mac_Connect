@@ -1,4 +1,4 @@
-﻿﻿# setup_windows.ps1 - Gaming-PC (als Administrator ausführen)
+﻿# setup_windows.ps1 - Gaming-PC (als Administrator ausfuehren)
 # Richtet vollautomatisch ein:
 #   Wake-on-LAN - OpenSSH - Python - WMC Agent - Sunshine - Auto-Login - Tailscale
 

@@ -1,5 +1,5 @@
-﻿﻿# uninstall_windows.ps1 - Gaming-PC (als Administrator ausführen)
-# Macht ALLE Änderungen von setup_windows.ps1 und optimize_windows.ps1 rückgängig
+﻿# uninstall_windows.ps1 - Gaming-PC (als Administrator ausfuehren)
+# Macht ALLE Aenderungen von setup_windows.ps1 und optimize_windows.ps1 rueckgaengig
 
 #Requires -RunAsAdministrator
 
@@ -10,22 +10,22 @@ $Steps  = 10
 Write-Host ""
 Write-Host "+======================================================+" -ForegroundColor Red
 Write-Host "|         WMC Deinstallation - Gaming-PC               |" -ForegroundColor Red
-Write-Host "|  Alle Änderungen werden rückgängig gemacht           |" -ForegroundColor Red
+Write-Host "|  Alle Aenderungen werden rueckgaengig gemacht           |" -ForegroundColor Red
 Write-Host "+======================================================+" -ForegroundColor Red
 Write-Host ""
-Write-Host "  Folgendes wird entfernt / zurückgesetzt:" -ForegroundColor Yellow
+Write-Host "  Folgendes wird entfernt / zurueckgesetzt:" -ForegroundColor Yellow
 Write-Host "  - WMC Agent (Windows-Dienst)"
 Write-Host "  - Sunshine (Game-Streaming)"
 Write-Host "  - Auto-Login"
 Write-Host "  - Alle WMC Firewall-Regeln"
 Write-Host "  - Latenz-Optimierungen (Ultimate Performance, Interrupt Moderation, etc.)"
 Write-Host "  - Nagle-Algorithmus wieder aktivieren"
-Write-Host "  - Energie-Einstellungen zurücksetzen"
+Write-Host "  - Energie-Einstellungen zuruecksetzen"
 Write-Host "  - Fast Startup wieder aktivieren"
-Write-Host "  - Wake-on-LAN Einstellungen zurücksetzen"
+Write-Host "  - Wake-on-LAN Einstellungen zuruecksetzen"
 Write-Host "  - OpenSSH Server deinstallieren"
 Write-Host "  - Tailscale deinstallieren (optional)"
-Write-Host "  - WMC-Dateien löschen (C:\WMC)"
+Write-Host "  - WMC-Dateien loeschen (C:\WMC)"
 Write-Host ""
 $confirm = Read-Host "  Wirklich alles deinstallieren? (ja/n)"
 if ($confirm -ne "ja") {
@@ -75,7 +75,7 @@ if ($uninstaller) {
 $sunshineConf = "$env:APPDATA\Sunshine"
 if (Test-Path $sunshineConf) {
     Remove-Item -Recurse -Force $sunshineConf -ErrorAction SilentlyContinue
-    Write-Host "  OK: Sunshine-Konfiguration gelöscht"
+    Write-Host "  OK: Sunshine-Konfiguration geloescht"
 }
 
 # -- 3. Auto-Login deaktivieren ------------------------------------------------
@@ -95,9 +95,9 @@ foreach ($rule in $rules) {
     Write-Host "  OK: $rule entfernt"
 }
 
-# -- 5. Latenz-Optimierungen zurücksetzen -------------------------------------
+# -- 5. Latenz-Optimierungen zuruecksetzen -------------------------------------
 Write-Host ""
-Write-Host "[5/$Steps] Latenz-Optimierungen zurücksetzen" -ForegroundColor Yellow
+Write-Host "[5/$Steps] Latenz-Optimierungen zuruecksetzen" -ForegroundColor Yellow
 
 # Ultimate Performance Power Plan entfernen und Balanced wiederherstellen
 $balancedGuid = "381b4222-f694-41f0-9685-ff5bb260df2e"
@@ -119,10 +119,10 @@ Get-NetAdapter | Where-Object { $_.Status -eq "Up" } | ForEach-Object {
 }
 Write-Host "  OK: Interrupt Moderation wieder aktiviert"
 
-# Visuelle Effekte auf Windows-Standard zurücksetzen
+# Visuelle Effekte auf Windows-Standard zuruecksetzen
 Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" `
     -Name "VisualFXSetting" -Value 0 -ErrorAction SilentlyContinue
-Write-Host "  OK: Visuelle Effekte zurückgesetzt"
+Write-Host "  OK: Visuelle Effekte zurueckgesetzt"
 
 # -- 6. Nagle-Algorithmus wieder aktivieren -----------------------------------
 Write-Host ""
@@ -142,7 +142,7 @@ Write-Host "  OK: Nagle-Algorithmus aktiv (Windows-Standard)"
 
 # -- 7. Netzwerkadapter-Energiesparmodi wiederherstellen ----------------------
 Write-Host ""
-Write-Host "[7/$Steps] Netzwerkadapter-Einstellungen zurücksetzen" -ForegroundColor Yellow
+Write-Host "[7/$Steps] Netzwerkadapter-Einstellungen zuruecksetzen" -ForegroundColor Yellow
 Get-NetAdapter | Where-Object { $_.Status -eq "Up" } | ForEach-Object {
     $name = $_.Name
     foreach ($kw in @("*EEE", "EEELinkAdvertisement", "*GreenEthernet",
@@ -153,14 +153,14 @@ Get-NetAdapter | Where-Object { $_.Status -eq "Up" } | ForEach-Object {
     Write-Host "  OK: $name -> Standard wiederhergestellt"
 }
 
-# -- 8. Fast Startup und Ruhezustand zurücksetzen -----------------------------
+# -- 8. Fast Startup und Ruhezustand zuruecksetzen -----------------------------
 Write-Host ""
-Write-Host "[8/$Steps] Fast Startup und Energieeinstellungen zurücksetzen" -ForegroundColor Yellow
+Write-Host "[8/$Steps] Fast Startup und Energieeinstellungen zuruecksetzen" -ForegroundColor Yellow
 reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Power" `
     /v HiberbootEnabled /t REG_DWORD /d 1 /f | Out-Null
 Write-Host "  OK: Fast Startup wieder aktiviert"
 
-# Wake-on-LAN in Netzwerktreibern zurücksetzen
+# Wake-on-LAN in Netzwerktreibern zuruecksetzen
 Get-NetAdapter | Where-Object { $_.Status -eq "Up" } | ForEach-Object {
     $name = $_.Name
     foreach ($kw in @("WakeOnMagicPacket", "*WakeOnMagicPacket", "*WakeOnPattern")) {
@@ -181,12 +181,12 @@ Write-Host "  OK: OpenSSH Server deinstalliert"
 
 # -- 10. WMC-Dateien + Tailscale (optional) ------------------------------------
 Write-Host ""
-Write-Host "[10/$Steps] Aufräumen" -ForegroundColor Yellow
+Write-Host "[10/$Steps] Aufraeumen" -ForegroundColor Yellow
 
-# WMC-Verzeichnis löschen
+# WMC-Verzeichnis loeschen
 if (Test-Path $WmcDir) {
     Remove-Item -Recurse -Force $WmcDir -ErrorAction SilentlyContinue
-    Write-Host "  OK: C:\WMC gelöscht"
+    Write-Host "  OK: C:\WMC geloescht"
 }
 
 # Tailscale - optional
@@ -197,7 +197,7 @@ if ($tsChoice -match "^[jJyY]") {
         winget uninstall --id Tailscale.Tailscale --silent 2>$null
         Write-Host "  OK: Tailscale deinstalliert"
     } else {
-        Write-Host "  Bitte Tailscale manuell über die Windows-Einstellungen deinstallieren" -ForegroundColor Yellow
+        Write-Host "  Bitte Tailscale manuell ueber die Windows-Einstellungen deinstallieren" -ForegroundColor Yellow
     }
 } else {
     Write-Host "  Tailscale behalten"
@@ -214,14 +214,14 @@ Write-Host "  OK WMC Agent entfernt"
 Write-Host "  OK Sunshine deinstalliert"
 Write-Host "  OK Auto-Login deaktiviert"
 Write-Host "  OK Firewall-Regeln entfernt"
-Write-Host "  OK Latenz-Optimierungen zurückgesetzt"
+Write-Host "  OK Latenz-Optimierungen zurueckgesetzt"
 Write-Host "  OK Nagle-Algorithmus reaktiviert"
 Write-Host "  OK Fast Startup reaktiviert"
 Write-Host "  OK Wake-on-LAN (Treiber) deaktiviert"
 Write-Host "  OK OpenSSH Server deinstalliert"
-Write-Host "  OK C:\WMC gelöscht"
+Write-Host "  OK C:\WMC geloescht"
 Write-Host ""
-Write-Host "  Manuell noch nötig:" -ForegroundColor Yellow
+Write-Host "  Manuell noch noetig:" -ForegroundColor Yellow
 Write-Host "  - BIOS/UEFI: Wake on LAN dort ebenfalls deaktivieren"
 Write-Host ""
 Write-Host "  PC-Neustart empfohlen." -ForegroundColor Cyan
