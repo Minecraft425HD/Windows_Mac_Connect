@@ -446,6 +446,139 @@ def cmd_profiles():
         print(f"  {p}   (wmc -p {p} stream)")
 
 
+# ── Modus-Verwaltung ──────────────────────────────────────────────────────────
+
+def _detect_home_network(cfg: dict) -> bool:
+    """Prüft ob Mac im Heimnetz ist (lokale Relay-IP erreichbar)."""
+    local_url = cfg.get("WMC_LOCAL_RELAY_URL", "")
+    if not local_url:
+        return False
+    try:
+        req = urllib.request.Request(
+            local_url.rstrip("/") + "/status",
+            headers={"Authorization": f"Bearer {cfg['WMC_API_TOKEN']}"},
+        )
+        with urllib.request.urlopen(req, timeout=2):
+            return True
+    except Exception:
+        return False
+
+
+def _get_active_relay_url(cfg: dict) -> tuple[str, str]:
+    """Gibt (url, modus) zurück — automatisch Lokal oder Tailscale."""
+    local_url    = cfg.get("WMC_LOCAL_RELAY_URL", "")
+    tailscale_url = cfg.get("WMC_RELAY_URL", "")
+
+    if local_url and _detect_home_network(cfg):
+        return local_url, "lokal"
+    return tailscale_url, "stream"
+
+
+def cmd_mode(cfg, args: list):
+    """
+    wmc mode             → aktuellen Modus + Netz anzeigen
+    wmc mode auto        → automatisch wechseln (Standard)
+    wmc mode lokal       → LAN-Relay erzwingen
+    wmc mode stream      → Tailscale-Relay erzwingen
+    wmc mode set-local <url>  → lokale Relay-URL konfigurieren
+    """
+    profile_path = get_profile_path(cfg.get("_profile", "default"))
+    if not profile_path.exists() and LEGACY_CONFIG.exists():
+        profile_path = LEGACY_CONFIG
+
+    subcmd = args[0] if args else ""
+
+    if subcmd == "set-local":
+        if len(args) < 2:
+            print("Verwendung: wmc mode set-local <url>")
+            print("Beispiel:   wmc mode set-local http://192.168.1.50:8765")
+            sys.exit(1)
+        local_url = args[1].strip()
+        # In Profil eintragen
+        text = profile_path.read_text() if profile_path.exists() else ""
+        lines = [l for l in text.splitlines() if not l.startswith("WMC_LOCAL_RELAY_URL")]
+        lines.append(f"WMC_LOCAL_RELAY_URL={local_url}")
+        profile_path.write_text("\n".join(lines) + "\n")
+        profile_path.chmod(0o600)
+        print(f"Lokale Relay-URL gesetzt: {local_url}")
+        print("Ab jetzt wechselt wmc automatisch zwischen LAN und Tailscale.")
+        return
+
+    # Aktuellen Netz-Status prüfen
+    local_url     = cfg.get("WMC_LOCAL_RELAY_URL", "")
+    tailscale_url = cfg.get("WMC_RELAY_URL", "")
+    in_home_net   = _detect_home_network(cfg)
+
+    if not subcmd or subcmd == "auto":
+        # Status anzeigen
+        print("\033[1mWMC Modus\033[0m")
+        print()
+        if local_url:
+            net_status = "\033[32mIM HEIMNETZ\033[0m" if in_home_net else "\033[33mUNTERWEGS\033[0m"
+            print(f"  Netzwerk:     {net_status}")
+            print(f"  Aktiver Relay: {local_url if in_home_net else tailscale_url}")
+            print()
+            if in_home_net:
+                print("  Modus: \033[32mLOKAL\033[0m — direkte LAN-Verbindung, minimale Latenz")
+            else:
+                print("  Modus: \033[36mSTREAM\033[0m — Tailscale VPN, funktioniert weltweit")
+        else:
+            print("  Keine lokale Relay-URL konfiguriert.")
+            print("  Einrichten mit: wmc mode set-local http://<lokale-pi-ip>:8765")
+            print()
+            print(f"  Aktiver Relay: {tailscale_url} (immer Tailscale)")
+        return
+
+    forced = subcmd.lower()
+    if forced not in ("lokal", "stream"):
+        print(f"Unbekannter Modus: {forced}")
+        print("Verfügbar: lokal, stream, auto, set-local <url>")
+        sys.exit(1)
+
+    # Erzwungenen Modus in Profil speichern
+    text  = profile_path.read_text() if profile_path.exists() else ""
+    lines = [l for l in text.splitlines() if not l.startswith("WMC_FORCED_MODE")]
+    lines.append(f"WMC_FORCED_MODE={forced}")
+    profile_path.write_text("\n".join(lines) + "\n")
+    profile_path.chmod(0o600)
+
+    if forced == "lokal":
+        if not local_url:
+            print("Keine lokale Relay-URL konfiguriert.")
+            print("Einrichten mit: wmc mode set-local http://<lokale-pi-ip>:8765")
+            sys.exit(1)
+        print(f"\033[32mLOKALMODUS erzwungen\033[0m — Relay: {local_url}")
+    else:
+        print(f"\033[36mSTREAMMODUS erzwungen\033[0m — Relay: {tailscale_url}")
+
+    print("Zurück zu automatisch: wmc mode auto")
+
+
+def _resolve_relay_url(cfg: dict) -> dict:
+    """Wählt automatisch LAN oder Tailscale — gibt modifiziertes cfg zurück."""
+    forced = cfg.get("WMC_FORCED_MODE", "")
+    local_url = cfg.get("WMC_LOCAL_RELAY_URL", "")
+
+    if forced == "lokal" and local_url:
+        cfg = dict(cfg)
+        cfg["WMC_RELAY_URL"] = local_url
+        cfg["_mode"] = "lokal"
+        return cfg
+
+    if forced == "stream" or not local_url:
+        cfg["_mode"] = "stream"
+        return cfg
+
+    # Automatisch erkennen
+    if _detect_home_network(cfg):
+        cfg = dict(cfg)
+        cfg["WMC_RELAY_URL"] = local_url
+        cfg["_mode"] = "lokal"
+    else:
+        cfg["_mode"] = "stream"
+    return cfg
+
+
 USAGE = """
 wmc [-p <profil>] <befehl>
 
@@ -460,6 +593,12 @@ wmc [-p <profil>] <befehl>
   wmc profiles            Alle Profile anzeigen
   wmc config              Standardprofil konfigurieren
   wmc -p gaming config    Profil 'gaming' konfigurieren
+
+  wmc mode                Aktuellen Modus anzeigen (Lokal / Stream)
+  wmc mode auto           Automatisch wechseln (Standard)
+  wmc mode lokal          LAN-Verbindung erzwingen
+  wmc mode stream         Tailscale-Verbindung erzwingen
+  wmc mode set-local <url>  Lokale Pi-IP konfigurieren
 
 Beispiel mit mehreren PCs:
   wmc -p gaming stream
@@ -492,7 +631,15 @@ def main():
         cmd_profiles()
         return
     cfg = load_config(profile)
+    if cmd == "mode":
+        require_config(cfg)
+        cmd_mode(cfg, args[1:])
+        return
     require_config(cfg)
+    cfg = _resolve_relay_url(cfg)  # automatisch LAN oder Tailscale wählen
+    # Modus-Indikator anzeigen wenn nicht stream
+    if cfg.get("_mode") == "lokal" and cmd not in ("status",):
+        print(f"\033[32m[LOKALMODUS — LAN]\033[0m")
     if cmd == "status":
         cmd_status(cfg)
     elif cmd == "wake":
