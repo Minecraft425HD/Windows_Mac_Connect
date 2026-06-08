@@ -1,4 +1,4 @@
-# set_mode.ps1 — Gaming-PC (als Administrator ausführen)
+﻿# set_mode.ps1 - Gaming-PC (als Administrator ausführen)
 # Wechselt zwischen Stream-Modus und Lokal-Modus
 #
 # Streammodus:  Sunshine aktiv, Ultimate Performance, Netzwerk optimiert
@@ -31,7 +31,7 @@ function Write-Mode($m) {
     Set-Content -Path $MODE_FILE -Value $m
 }
 
-# ── Status anzeigen ──────────────────────────────────────────────────────────
+# -- Status anzeigen ----------------------------------------------------------
 if ($Modus -eq "status") {
     $current = Get-CurrentMode
     $svc     = Get-Service -Name "SunshineService" -ErrorAction SilentlyContinue
@@ -50,7 +50,7 @@ if ($Modus -eq "status") {
     exit 0
 }
 
-# ── Streammodus ───────────────────────────────────────────────────────────────
+# -- Streammodus ---------------------------------------------------------------
 if ($Modus -eq "stream") {
     Write-Host ""
     Write-Host "  Wechsle zu STREAMMODUS..." -ForegroundColor Cyan
@@ -69,7 +69,7 @@ if ($Modus -eq "stream") {
             Write-Host "        FEHLER: Sunshine konnte nicht gestartet werden" -ForegroundColor Red
         }
     } else {
-        Write-Host "        Sunshine nicht installiert — setup_windows.ps1 ausfuehren" -ForegroundColor Yellow
+        Write-Host "        Sunshine nicht installiert - setup_windows.ps1 ausfuehren" -ForegroundColor Yellow
     }
 
     # Ultimate Performance aktivieren
@@ -96,11 +96,11 @@ if ($Modus -eq "stream") {
 
     Write-Host ""
     Write-Host "  STREAMMODUS aktiv." -ForegroundColor Cyan
-    Write-Host "  Sunshine ist bereit — 'wmc stream' auf dem MacBook starten." -ForegroundColor Cyan
+    Write-Host "  Sunshine ist bereit - 'wmc stream' auf dem MacBook starten." -ForegroundColor Cyan
     Write-Host ""
 }
 
-# ── Lokalmodus ────────────────────────────────────────────────────────────────
+# -- Lokalmodus ----------------------------------------------------------------
 if ($Modus -eq "lokal") {
     Write-Host ""
     Write-Host "  Wechsle zu LOKALMODUS..." -ForegroundColor Green

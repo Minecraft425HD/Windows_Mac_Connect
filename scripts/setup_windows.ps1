@@ -1,6 +1,6 @@
-# setup_windows.ps1 — Gaming-PC (als Administrator ausführen)
+﻿# setup_windows.ps1 - Gaming-PC (als Administrator ausführen)
 # Richtet vollautomatisch ein:
-#   Wake-on-LAN · OpenSSH · Python · WMC Agent · Sunshine · Auto-Login · Tailscale
+#   Wake-on-LAN - OpenSSH - Python - WMC Agent - Sunshine - Auto-Login - Tailscale
 
 #Requires -RunAsAdministrator
 
@@ -18,13 +18,13 @@ $Steps    = 8
 New-Item -ItemType Directory -Force -Path $WmcDir | Out-Null
 
 Write-Host ""
-Write-Host "╔══════════════════════════════════════════════════════╗" -ForegroundColor Cyan
-Write-Host "║         WMC Windows Setup — Gaming-PC                ║" -ForegroundColor Cyan
-Write-Host "║  Wake-on-LAN · Streaming · Fernsteuerung             ║" -ForegroundColor Cyan
-Write-Host "╚══════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+Write-Host "+======================================================+" -ForegroundColor Cyan
+Write-Host "|         WMC Windows Setup - Gaming-PC                |" -ForegroundColor Cyan
+Write-Host "|  Wake-on-LAN - Streaming - Fernsteuerung             |" -ForegroundColor Cyan
+Write-Host "+======================================================+" -ForegroundColor Cyan
 Write-Host ""
 
-# ── 1. Wake-on-LAN ────────────────────────────────────────────────────────────
+# -- 1. Wake-on-LAN ------------------------------------------------------------
 Write-Host "[1/$Steps] Wake-on-LAN aktivieren" -ForegroundColor Yellow
 Write-Host "  Damit der PC per Netzwerk eingeschaltet werden kann."
 Get-NetAdapter | Where-Object { $_.Status -eq "Up" } | ForEach-Object {
@@ -40,7 +40,7 @@ reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Power" `
     /v HiberbootEnabled /t REG_DWORD /d 0 /f | Out-Null
 Write-Host "  Fast Startup deaktiviert (erforderlich fur WoL nach Shutdown)"
 
-# ── 2. OpenSSH ────────────────────────────────────────────────────────────────
+# -- 2. OpenSSH ----------------------------------------------------------------
 Write-Host ""
 Write-Host "[2/$Steps] OpenSSH Server" -ForegroundColor Yellow
 Write-Host "  Ermoeglicht sichere Verbindungen vom MacBook."
@@ -56,7 +56,7 @@ New-NetFirewallRule -Name "WMC-SSH" -DisplayName "WMC SSH" `
     -ErrorAction SilentlyContinue | Out-Null
 Write-Host "  OK: OpenSSH Server laeuft"
 
-# ── 3. Python ────────────────────────────────────────────────────────────────
+# -- 3. Python ----------------------------------------------------------------
 Write-Host ""
 Write-Host "[3/$Steps] Python" -ForegroundColor Yellow
 Write-Host "  Benoetigt fuer den WMC Agent (Hintergrunddienst)."
@@ -76,7 +76,7 @@ if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
 }
 Write-Host "  OK: $((python --version 2>&1))"
 
-# ── 4. WMC Agent ─────────────────────────────────────────────────────────────
+# -- 4. WMC Agent -------------------------------------------------------------
 Write-Host ""
 Write-Host "[4/$Steps] WMC Agent installieren" -ForegroundColor Yellow
 Write-Host "  Empfaengt Fernbefehle: Herunterfahren, Schlafen, Sperren."
@@ -103,7 +103,7 @@ New-NetFirewallRule -Name "WMC-Agent" -DisplayName "WMC Agent" `
     -ErrorAction SilentlyContinue | Out-Null
 Write-Host "  OK: WMC Agent laeuft als Windows-Dienst (Port $AgentPort)"
 
-# ── 5. Sunshine ───────────────────────────────────────────────────────────────
+# -- 5. Sunshine ---------------------------------------------------------------
 Write-Host ""
 Write-Host "[5/$Steps] Sunshine Game-Streaming" -ForegroundColor Yellow
 Write-Host "  Uebertraegt Bild + Ton mit niedrigster Latenz (Hardware-Encoding)."
@@ -158,7 +158,7 @@ New-NetFirewallRule -Name "WMC-Sunshine-UDP" -DisplayName "WMC Sunshine UDP" `
 Start-Service -Name "SunshineService" -ErrorAction SilentlyContinue
 Write-Host "  OK: Sunshine konfiguriert und gestartet"
 
-# ── 6. Latenz-Optimierungen ───────────────────────────────────────────────────
+# -- 6. Latenz-Optimierungen ---------------------------------------------------
 Write-Host ""
 Write-Host "[6/$Steps] Latenz-Optimierungen" -ForegroundColor Yellow
 Write-Host "  Ultimate Performance, Interrupt Moderation off, HAGS, Nagle off."
@@ -172,7 +172,7 @@ if (Test-Path "$PSScriptRoot\optimize_windows.ps1") {
     Write-Host "  optimize_windows.ps1 nicht gefunden -- uebersprungen" -ForegroundColor Gray
 }
 
-# ── 7. Auto-Login ─────────────────────────────────────────────────────────────
+# -- 7. Auto-Login -------------------------------------------------------------
 Write-Host ""
 Write-Host "[7/$Steps] Auto-Login einrichten" -ForegroundColor Yellow
 Write-Host "  Damit Windows nach Wake-on-LAN automatisch einloggt und Sunshine startet."
@@ -210,7 +210,7 @@ if ($alChoice -match "^[jJyY]") {
     Write-Host "  Uebersprungen. Hinweis: Moonlight kann nicht streamen solange Windows am Anmeldebildschirm ist." -ForegroundColor Gray
 }
 
-# ── 8. Tailscale ──────────────────────────────────────────────────────────────
+# -- 8. Tailscale --------------------------------------------------------------
 Write-Host ""
 Write-Host "[8/$Steps] Tailscale (sicheres VPN)" -ForegroundColor Yellow
 Write-Host "  Verbindet PC, Raspberry Pi und MacBook ueber das Internet ohne Port-Forwarding."
@@ -230,11 +230,11 @@ if (-not (Get-Command tailscale -ErrorAction SilentlyContinue)) {
 }
 Write-Host "  Tailscale starten und mit deinem Account einloggen!" -ForegroundColor Cyan
 
-# ── Zusammenfassung ───────────────────────────────────────────────────────────
+# -- Zusammenfassung -----------------------------------------------------------
 Write-Host ""
-Write-Host "══════════════════════════════════════════════════════" -ForegroundColor Green
+Write-Host "======================================================" -ForegroundColor Green
 Write-Host "  Setup abgeschlossen!" -ForegroundColor Green
-Write-Host "══════════════════════════════════════════════════════" -ForegroundColor Green
+Write-Host "======================================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "  MAC-Adresse (fuer den Raspberry Pi notieren):" -ForegroundColor White
 Get-NetAdapter | Where-Object { $_.Status -eq "Up" } `
