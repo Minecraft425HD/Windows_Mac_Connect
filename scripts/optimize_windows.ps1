@@ -1,4 +1,4 @@
-# optimize_windows.ps1 — Latenz-Optimierung fuer Gaming & Streaming (als Administrator ausfuehren)
+﻿# optimize_windows.ps1 - Latenz-Optimierung fuer Gaming & Streaming (als Administrator ausfuehren)
 #Requires -RunAsAdministrator
 
 $ErrorActionPreference = "SilentlyContinue"
@@ -9,7 +9,7 @@ Write-Host "=== Windows Latenz-Optimierung ===" -ForegroundColor Cyan
 Write-Host "Ausfuehren als: $([System.Security.Principal.WindowsIdentity]::GetCurrent().Name)" -ForegroundColor Gray
 Write-Host ""
 
-# ── 1. Ultimate Performance Power Plan ───────────────────────────────────────
+# -- 1. Ultimate Performance Power Plan ---------------------------------------
 Write-Host "[1/7] Ultimate Performance Power Plan..." -ForegroundColor Yellow
 
 $ultGuid = "e9a42b02-d5df-448d-aa00-03f14749eb61"
@@ -27,7 +27,7 @@ if ($LASTEXITCODE -eq 0) {
     Write-Host "  WARNUNG: Aktivierung fehlgeschlagen" -ForegroundColor Red
 }
 
-# ── 2. Interrupt Moderation deaktivieren ─────────────────────────────────────
+# -- 2. Interrupt Moderation deaktivieren -------------------------------------
 Write-Host "[2/7] Interrupt Moderation deaktivieren..." -ForegroundColor Yellow
 
 $activeAdapters = Get-NetAdapter | Where-Object { $_.Status -eq "Up" }
@@ -45,7 +45,7 @@ if ($imCount -gt 0) {
     Write-Host "  WARNUNG: Kein kompatibler Adapter" -ForegroundColor DarkYellow
 }
 
-# ── 3. NVIDIA Ultra Low Latency ───────────────────────────────────────────────
+# -- 3. NVIDIA Ultra Low Latency -----------------------------------------------
 Write-Host "[3/7] NVIDIA Ultra Low Latency..." -ForegroundColor Yellow
 
 $nvidiaSmiPaths = @(
@@ -84,7 +84,7 @@ if ($nvidiaSmi) {
     }
 }
 
-# ── 4. Visuelle Effekte deaktivieren ─────────────────────────────────────────
+# -- 4. Visuelle Effekte deaktivieren -----------------------------------------
 Write-Host "[4/7] Windows visuelle Effekte reduzieren..." -ForegroundColor Yellow
 
 $visualFxPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects"
@@ -108,7 +108,7 @@ Set-ItemProperty -Path $animInfoPath -Name "UserPreferencesMask" `
 $Changes.Add("Visuelle Effekte: Animationen und Uebergaenge deaktiviert")
 Write-Host "  OK" -ForegroundColor Green
 
-# ── 5. Hardware-accelerated GPU Scheduling (HAGS) ─────────────────────────────
+# -- 5. Hardware-accelerated GPU Scheduling (HAGS) -----------------------------
 Write-Host "[5/7] Hardware-accelerated GPU Scheduling (HAGS)..." -ForegroundColor Yellow
 
 $graphicsPath = "HKLM:\SYSTEM\CurrentControlSet\Control\GraphicsDrivers"
@@ -125,7 +125,7 @@ if ($?) {
     Write-Host "  WARNUNG: Setzen fehlgeschlagen" -ForegroundColor Red
 }
 
-# ── 6. Nagle-Algorithmus deaktivieren ─────────────────────────────────────────
+# -- 6. Nagle-Algorithmus deaktivieren -----------------------------------------
 Write-Host "[6/7] Nagle-Algorithmus deaktivieren (TcpAckFrequency / TCPNoDelay)..." -ForegroundColor Yellow
 
 $ifacesPath = "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces"
@@ -154,8 +154,8 @@ if ($nagleCount -gt 0) {
     Write-Host "  WARNUNG: Keine Interfaces gefunden" -ForegroundColor DarkYellow
 }
 
-# ── 7. Netzwerkadapter auf maximale Leistung ──────────────────────────────────
-Write-Host "[7/7] Netzwerkadapter — maximale Leistung..." -ForegroundColor Yellow
+# -- 7. Netzwerkadapter auf maximale Leistung ----------------------------------
+Write-Host "[7/7] Netzwerkadapter - maximale Leistung..." -ForegroundColor Yellow
 
 $perfKeywords = @(
     "*EEE",                    # Energy Efficient Ethernet
@@ -200,11 +200,11 @@ if ($perfAdapterCount -gt 0) {
     Write-Host "  INFO: Keine Energiespar-Eigenschaften gefunden (Adapter bereits optimal)" -ForegroundColor Gray
 }
 
-# ── Zusammenfassung ───────────────────────────────────────────────────────────
+# -- Zusammenfassung -----------------------------------------------------------
 Write-Host ""
-Write-Host "════════════════════════════════════════════════════" -ForegroundColor Cyan
+Write-Host "====================================================" -ForegroundColor Cyan
 Write-Host " ZUSAMMENFASSUNG" -ForegroundColor Cyan
-Write-Host "════════════════════════════════════════════════════" -ForegroundColor Cyan
+Write-Host "====================================================" -ForegroundColor Cyan
 
 if ($Changes.Count -gt 0) {
     Write-Host ""
@@ -223,9 +223,9 @@ if ($Warnings.Count -gt 0) {
 }
 
 Write-Host ""
-Write-Host "════════════════════════════════════════════════════" -ForegroundColor Magenta
+Write-Host "====================================================" -ForegroundColor Magenta
 Write-Host " NEUSTART ERFORDERLICH" -ForegroundColor Magenta
 Write-Host " Bitte Windows neu starten, damit alle Aenderungen" -ForegroundColor Magenta
 Write-Host " wirksam werden (HAGS, Treiber, Registry-Werte)." -ForegroundColor Magenta
-Write-Host "════════════════════════════════════════════════════" -ForegroundColor Magenta
+Write-Host "====================================================" -ForegroundColor Magenta
 Write-Host ""
