@@ -1,4 +1,4 @@
-﻿# set_mode.ps1 - Gaming-PC (als Administrator ausführen)
+﻿# set_mode.ps1 - Gaming-PC (als Administrator ausfuehren)
 # Wechselt zwischen Stream-Modus und Lokal-Modus
 #
 # Streammodus:  Sunshine aktiv, Ultimate Performance, Netzwerk optimiert
@@ -121,8 +121,8 @@ if ($Modus -eq "lokal") {
     powercfg /setactive $BALANCED_GUID 2>$null
     Write-Host "        OK: Balanced-Plan aktiv"
 
-    # Netzwerk-Optimierungen zurücksetzen (nicht nötig beim lokalen Spielen)
-    Write-Host "  [3/3] Netzwerk-Einstellungen zurücksetzen..."
+    # Netzwerk-Optimierungen zuruecksetzen (nicht noetig beim lokalen Spielen)
+    Write-Host "  [3/3] Netzwerk-Einstellungen zuruecksetzen..."
     $tcpPath = "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters"
     Remove-ItemProperty -Path $tcpPath -Name "TcpAckFrequency" -ErrorAction SilentlyContinue
     Remove-ItemProperty -Path $tcpPath -Name "TCPNoDelay"      -ErrorAction SilentlyContinue
