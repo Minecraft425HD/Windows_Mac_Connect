@@ -78,15 +78,22 @@ if [[ ! -f "$ENV_FILE" ]]; then
     echo "  Bitte die folgenden Angaben zum Gaming-PC eingeben."
     echo "  (Auf dem Gaming-PC in PowerShell: ipconfig /all)"
     echo ""
-    read -rp "  MAC-Adresse des Gaming-PCs (z.B. AA:BB:CC:DD:EE:FF): " PC_MAC
+    read -rp "  MAC-Adresse WLAN (z.B. F8:FE:5E:7B:A5:7A): " PC_MAC_WLAN
+    read -rp "  MAC-Adresse LAN/Ethernet (leer lassen falls kein LAN): " PC_MAC_LAN
     read -rp "  Lokale IP-Adresse des Gaming-PCs (z.B. 192.168.1.100): " PC_IP
-    # Fallback auf Platzhalter wenn leer
-    PC_MAC="${PC_MAC:-AA:BB:CC:DD:EE:FF}"
+    # MACs zusammenfuehren (kommagetrennt, leere weglassen)
+    PC_MAC_WLAN="${PC_MAC_WLAN:-AA:BB:CC:DD:EE:FF}"
+    if [[ -n "$PC_MAC_LAN" ]]; then
+        PC_MAC="$PC_MAC_WLAN,$PC_MAC_LAN"
+    else
+        PC_MAC="$PC_MAC_WLAN"
+    fi
     PC_IP="${PC_IP:-192.168.1.100}"
 
     cat > "$ENV_FILE" <<EOF
 # WMC Relay Konfiguration
 # Aendern und dann: sudo systemctl restart wmc-relay wmc-watchdog
+# WMC_PC_MAC kann kommagetrennte MACs enthalten (WLAN,LAN)
 
 WMC_API_TOKEN=$TOKEN
 WMC_PC_MAC=$PC_MAC

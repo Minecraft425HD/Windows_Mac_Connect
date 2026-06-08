@@ -39,6 +39,7 @@ def load_env(path="/etc/wmc/relay.env"):
 ENV = load_env()
 API_TOKEN    = ENV.get("WMC_API_TOKEN", "")
 PC_MAC       = ENV.get("WMC_PC_MAC", "?")
+PC_MACS      = [m.strip() for m in PC_MAC.split(",") if m.strip()]
 PC_IP        = ENV.get("WMC_PC_IP", "")
 RELAY_PORT   = int(ENV.get("WMC_RELAY_PORT", "8765"))
 AGENT_PORT   = int(ENV.get("WMC_AGENT_PORT", "9876"))
@@ -83,11 +84,12 @@ def agent_cmd(cmd: str) -> str:
 
 
 def send_wol():
-    mac_bytes = bytes.fromhex(PC_MAC.replace(":", "").replace("-", ""))
-    packet = b"\xff" * 6 + mac_bytes * 16
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        s.sendto(packet, (WOL_BROADCAST, 9))
+        for mac in PC_MACS:
+            mac_bytes = bytes.fromhex(mac.replace(":", "").replace("-", ""))
+            packet = b"\xff" * 6 + mac_bytes * 16
+            s.sendto(packet, (WOL_BROADCAST, 9))
 
 
 def pc_ping() -> bool:
@@ -188,7 +190,7 @@ def draw(stdscr, status: dict, last_refresh: float, action_msg: str):
     row += 1
 
     safe_addstr(row, 4, "PC MAC      ", NORMAL)
-    safe_addstr(row, 16, PC_MAC, NORMAL)
+    safe_addstr(row, 16, " | ".join(PC_MACS) if PC_MACS else "?", NORMAL)
     row += 2
 
     # ── Steuerung ─────────────────────────────────────────────────────────────
@@ -306,7 +308,7 @@ def main(stdscr):
         elif ch == "w":
             try:
                 send_wol()
-                action_msg = f"Wake-on-LAN gesendet → {PC_MAC}"
+                action_msg = f"Wake-on-LAN gesendet → {', '.join(PC_MACS)}"
                 log(action_msg)
             except Exception as e:
                 action_msg = f"WoL Fehler: {e}"
